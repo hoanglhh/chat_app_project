@@ -1,37 +1,7 @@
-import { useState } from "react"
-
-const MessageForm = ({ onCreate }) => {
-  const [name, setName] = useState('')
-  const [content, setContent] = useState('')
-
-  const handleSubmit = (event) => {
-    event.preventDefault()
-
-    if (name.trim() === '' || content.trim() === '') {
-      return
-    }
-
-    const messageObject = {
-      name,
-      content,
-      createdAt: new Date().toISOString()
-    }
-
-    onCreate(messageObject)
-
-    setName('')
-    setContent('')
-  }
-  const handleNameChange = (event) => {
-    setName(event.target.value)
-  }
-  
-  const handleContentChange = (event) => {
-    setContent(event.target.value)
-  }
+const MessageForm = ({ name, content, addMessage, handleContentChange, handleNameChange }) => {
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={addMessage}>
       <div>
         Name: <input 
         value={name}
