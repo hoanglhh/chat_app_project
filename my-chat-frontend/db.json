@@ -2,9 +2,17 @@
   "messages": [
     {
       "name": "Hoang",
-      "content": "Hi",
-      "createdAt": "2026-07-02T17:08:38.355Z",
-      "id": 1
+      "content": "a",
+      "room": "study",
+      "createdAt": "2026-07-02T19:21:10.815Z",
+      "id": 3
+    },
+    {
+      "name": "Hoang",
+      "content": "1",
+      "room": "study",
+      "createdAt": "2026-07-02T19:28:46.340Z",
+      "id": 6
     }
   ]
 }

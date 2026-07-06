@@ -20,4 +20,4 @@ const update = (id, newMessage) => {
     .then(response => response.data)
 }
 
-export default {remove, create, getAll, update} 
+export default { remove, create, getAll, update }
