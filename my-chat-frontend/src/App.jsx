@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import MessageForm from "../components/MessageForm"
 import MessageList from "../components/MessageList"
 import messageService from '../services/messages'
@@ -6,13 +6,47 @@ import Notification from '../components/Notification'
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
-  const [name, setName] = useState('')
   const [content, setContent] = useState('')
   const [notification, setNotification] = useState({ message: null })
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [name, setName] = useState(() => {
+    return window.localStorage.getItem('chatName') || ''
+  })
+  const messageEndRef = useRef(null)
+  
+  const showNotification = (message) => {
+    setNotification({ message })
+
+    setTimeout(() => {
+      setNotification({ message: null })
+    }, 5000)
+  }
 
   useEffect(() => {
-    messageService.getAll().then(initialMessages => setMessages(initialMessages))
-  }, [])
+    messageEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
+
+    messageService.getAll()
+    .then(initialMessages => {
+      setMessages(initialMessages)
+  })
+    .catch(() => {
+      showNotification('Failed to load messages')
+    })
+    .finally(() => {
+      setLoading(false)
+    })
+}, [])
+
+  useEffect(() => {
+    if (name.trim() !== '') {
+      window.localStorage.setItem('chatName', name)
+    }
+  }, [name])
   
   const addMessage = (event) => {
     event.preventDefault()
@@ -27,22 +61,23 @@ const App = () => {
       createdAt: new Date().toISOString(),
     }
     
+    setSending(true)
+    
     messageService
     .create(messageObject)
     .then(returnedMessage => {
       setMessages(messages.concat(returnedMessage))
-      setName('')
       setContent('')
     })
     .catch(error => {
       if (error.response && error.response.status === 400) {
-        setNotification({ message: error.response.data.error })
+        showNotification(error.response.data.error)
       } else {
-        setNotification({ message: 'Failed! - Try sending again' })
+        showNotification('Failed to send message')
       }
-      setTimeout(() => {
-        setNotification({ message: null })
-      }, 5000)
+    })
+    .finally(() => {
+      setSending(false)
     })
   }
 
@@ -55,13 +90,10 @@ const App = () => {
       })
       .catch(error => {
         if (error.response && error.response.status === 400) {
-          setNotification({ message: error.response.data.error })
+          showNotification(error.response.data.error)
         } else {
-          setNotification({ message: 'Failed! - Try deleting again' })
+          showNotification('Failed! - Try deleting again')
         }
-        setTimeout(() => {
-          setNotification({ message: null })
-        }, 5000)
       })
     }
   }
@@ -74,11 +106,10 @@ const App = () => {
     setContent(event.target.value)
   }
 
-  const handleEdit = (id) => {
+  const handleEdit = (id, newContent) => {
     const editMessage = messages.find(message => message.id === id)
-    const newContent = window.prompt('Edit this message?', editMessage.content)
     
-    if (newContent === null) {
+    if (newContent.trim() === '') {
       return
     }
     
@@ -87,37 +118,59 @@ const App = () => {
       content: newContent
     }
 
-    if (newContent.trim() === '') {
-      return
-    }
+    setSaving(true)
 
-    messageService
+    return messageService
     .update(id, changedMessage)
     .then(returnedMessage => {
-      setMessages(messages.map(message => message.id === id ? returnedMessage : message))
+      setMessages(messages.map(message => 
+        message.id === id ? returnedMessage : message
+      ))
     })
     .catch(error => {
       if (error.response && error.response.status === 400) {
-        setNotification({ message: error.response.data.error })
+        showNotification(error.response.data.error)
       } else {
-        setNotification({ message: 'This message has already been deleted' })
+        showNotification('This message has already been deleted')
       }
-      setTimeout(() => {
-        setNotification({ message: null })
-      }, 5000)
+    })
+    .finally(() => {
+      setSaving(false)
     })
   }
   
   return (
-    <div>
+    <div className="app">
       <h1>Chat App</h1>
+
       <Notification notification={notification} />
-      <MessageForm addMessage={addMessage} 
-      name={name} content={content}
-      handleContentChange={handleContentChange}
-      handleNameChange={handleNameChange}/>
-      <MessageList messages={messages} handleDelete={handleDelete} 
-      handleEdit={handleEdit}/>
+
+      <div className="chat-panel">
+        <div className="message-list">
+          {loading ? (
+            <p>Loading messages...</p>
+          ) : (
+            <>
+              <MessageList
+                messages={messages}
+                handleDelete={handleDelete}
+                handleEdit={handleEdit}
+                saving={saving}
+              />
+              <div ref={messageEndRef} />
+            </>
+          )}
+        </div>
+
+        <MessageForm
+          addMessage={addMessage}
+          name={name}
+          content={content}
+          handleContentChange={handleContentChange}
+          handleNameChange={handleNameChange}
+          sending={sending}
+        />
+      </div>
     </div>
   )
 }
