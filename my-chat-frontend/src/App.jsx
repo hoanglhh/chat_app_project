@@ -15,6 +15,8 @@ const App = () => {
     return window.localStorage.getItem('chatName') || ''
   })
   const messageEndRef = useRef(null)
+  const [editingMessageId, setEditingMessageId] = useState(null)
+  const isEditing = editingMessageId !== null
   
   const showNotification = (message) => {
     setNotification({ message })
@@ -29,7 +31,6 @@ const App = () => {
   }, [messages])
 
   useEffect(() => {
-
     messageService.getAll()
     .then(initialMessages => {
       setMessages(initialMessages)
@@ -54,6 +55,11 @@ const App = () => {
     if (name.trim() === '' || content.trim() === '') {
       return
     }
+
+    if (editingMessageId !== null) {
+      handleEdit(editingMessageId, content)
+      return
+    } 
 
     const messageObject = {
       name,
@@ -126,6 +132,8 @@ const App = () => {
       setMessages(messages.map(message => 
         message.id === id ? returnedMessage : message
       ))
+      setEditingMessageId(null)
+      setContent('')
     })
     .catch(error => {
       if (error.response && error.response.status === 400) {
@@ -138,7 +146,17 @@ const App = () => {
       setSaving(false)
     })
   }
+
+  const startEditing = (message) => {
+    setEditingMessageId(message.id)
+    setContent(message.content)
+  }
   
+  const cancelEditing = () => {
+    setEditingMessageId(null)
+    setContent('')
+  }
+
   return (
     <div className="app">
       <h1>Chat App</h1>
@@ -154,8 +172,8 @@ const App = () => {
               <MessageList
                 messages={messages}
                 handleDelete={handleDelete}
-                handleEdit={handleEdit}
-                saving={saving}
+                currentName={name}
+                startEditing={startEditing}
               />
               <div ref={messageEndRef} />
             </>
@@ -169,6 +187,9 @@ const App = () => {
           handleContentChange={handleContentChange}
           handleNameChange={handleNameChange}
           sending={sending}
+          saving={saving}
+          isEditing={isEditing}
+          cancelEditing={cancelEditing}
         />
       </div>
     </div>

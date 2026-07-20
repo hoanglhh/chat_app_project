@@ -1,10 +1,10 @@
-const MessageForm = ({ name, content, addMessage, handleContentChange, handleNameChange, sending }) => {
-  const cannotSend = sending || content.trim() === ''
+const MessageForm = ({ name, content, addMessage, handleContentChange, handleNameChange, sending, saving, isEditing, cancelEditing }) => {
+  const cannotSend = sending || saving || content.trim() === ''
 
   const handleKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()        
-      if (content.trim() === '' || sending) {
+      if (content.trim() === '' || sending || saving) {
         return
       }
       event.currentTarget.form.requestSubmit()
@@ -30,8 +30,23 @@ const MessageForm = ({ name, content, addMessage, handleContentChange, handleNam
         />
       </div>
       <button type="submit" disabled={cannotSend}>
-        {sending ? 'Sending...' : 'Send'}
+        {saving ? 
+        'Saving...' 
+        : sending
+          ? 'Sending...'
+          : isEditing
+            ? 'Save'
+            : 'Send'}
       </button>
+      {isEditing && (
+        <button
+        type="button"
+        onClick={cancelEditing}
+        disabled={saving}
+        >
+        Cancel
+      </button>
+      )}
     </form>
   )
 }
