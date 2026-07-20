@@ -12,31 +12,33 @@ const Message = ({ message, handleDelete, currentName, startEditing }) => {
         <p>{message.content}</p>
         
         {isOwnMessage && (
-          <button className="menu-button" onClick={() => setIsMenuOpen(!isMenuOpen)}>
-            &#x22EE;
-          </button>
-        )}
+          <>
+            <button className="menu-button" onClick={() => setIsMenuOpen(!isMenuOpen)}>
+              &#x22EE;
+            </button>
 
-        {isMenuOpen && (
-          <div className="menu-dropdown"> 
-            <div className="message-actions">
+            {isMenuOpen && (
+              <div className="menu-dropdown"> 
+                <div className="message-actions">
 
-              <button onClick={() => {
-                startEditing(message)
-                setIsMenuOpen(false)
-              }}>
-                Edit
-              </button>
+                  <button onClick={() => {
+                    startEditing(message)
+                    setIsMenuOpen(false)
+                  }}>
+                    Edit
+                  </button>
 
-              <button onClick={() => {
-                handleDelete(message.id)
-                setIsMenuOpen(false)
-              }}>
-                Delete
-              </button>
-              
-            </div>
-          </div>
+                  <button onClick={() => {
+                    handleDelete(message.id)
+                    setIsMenuOpen(false)
+                  }}>
+                    Delete
+                  </button>
+
+                </div>
+              </div>
+            )}        
+          </>
         )}
       </div>
       <small className="message-time">{new Date(message.createdAt).toLocaleString()}</small>
