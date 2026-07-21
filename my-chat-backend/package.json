@@ -1,0 +1,28 @@
+{
+  "name": "my-chat-backend",
+  "version": "1.0.0",
+  "description": "",
+  "homepage": "https://github.com/hoanglhh/chat_app_project#readme",
+  "bugs": {
+    "url": "https://github.com/hoanglhh/chat_app_project/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hoanglhh/chat_app_project.git"
+  },
+  "author": "Huy Hoang Le",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "node --watch index.js",
+    "lint": "echo \"No backend lint configured yet\""
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "eslint": "^10.7.0",
+    "express": "^5.2.1",
+    "mongoose": "^9.7.4",
+    "morgan": "^1.11.0"
+  }
+}
