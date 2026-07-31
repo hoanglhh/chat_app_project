@@ -64,7 +64,6 @@ const App = () => {
     const messageObject = {
       name,
       content,
-      createdAt: new Date().toISOString(),
     }
     
     setSending(true)

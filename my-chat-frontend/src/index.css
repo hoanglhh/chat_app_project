@@ -1,7 +1,22 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+}
+
 .app {
   max-width: 640px;
-  height: 100vh;
-  margin: 20px auto;
+  height: 100%;
+  margin: 0 auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -23,11 +38,9 @@
 }
 
 form {
+  flex-shrink: 0;
   border-top: 1px solid #ddd;
   padding-top: 12px;
-}
-
-form {
   margin-bottom: 24px;
 }
 
@@ -64,15 +77,18 @@ button:disabled {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  max-width: 75%;
   margin: 6px 0;
 }
 
 .message-body p {
-  width: fit-content;
-  max-width: 75%;
+  margin: 0;
+  max-width: 100%;
   padding: 10px 12px;
   border-radius: 14px;
   background: #f1f1f1;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .message-time {
@@ -108,7 +124,6 @@ button:disabled {
 
 .own .message-body p {
   background: #dbeafe;
-  align-items: flex-end;
 }
 
 .own .message-body {

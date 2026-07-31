@@ -1,5 +1,5 @@
 import axios from 'axios'
-const baseUrl = 'http://localhost:3001/messages'
+const baseUrl = 'http://localhost:3001/api/messages'
 
 const remove = id => {
   return axios.delete(`${baseUrl}/${id}`)

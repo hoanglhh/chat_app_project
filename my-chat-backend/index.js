@@ -7,6 +7,8 @@ require('dotenv').config()
 app.use(cors())
 app.use(express.json())
 
+const Message = require('./models/message')
+
 morgan.token('body', (req) => {
   if (req.method === 'POST' || req.method === 'PUT') {
     return JSON.stringify(req.body)
@@ -19,37 +21,35 @@ app.use(
   morgan(':method :url :status :res[content-length] - :response-time ms :body')
 )
 
-let messages = []
-
-app.get('/api/messages', (req, res) => {
-  res.json(messages)
+app.get('/api/messages', (req, res, next) => {
+  Message.find({})
+    .then(messages => {
+      res.json(messages)
+    })
+    .catch(next)
 })
 
-app.get('/api/messages/:id', (req,res) => {
-  const id = req.params.id
-  const message = messages.find(message => message.id === id)
-
-  if (message) {
-    res.json(message)
-  } else {
-    res.status(404).end()
-  }
+app.get('/api/messages/:id', (req,res, next) => {
+  Message.findById(req.params.id)
+    .then(message => {
+      if (message) {
+        res.json(message)
+      } else {
+        res.status(404).end()
+      }
+    })
+    .catch(next)
 })
 
-app.delete('/api/messages/:id', (req,res) => {
-  const id = req.params.id
-  messages = messages.filter(message => message.id !== id)
-  res.status(204).end()
+app.delete('/api/messages/:id', (req,res, next) => {
+  Message.findByIdAndDelete(req.params.id)
+    .then(() => {
+      res.status(204).end()
+    })
+    .catch(next)
 })
 
-const generateId = () => {
-  const min = 1
-  const max = 1000000
-  const randomId = Math.floor(Math.random() * (max - min + 1)) + min
-  return String(randomId)
-}
-
-app.post('/api/messages', (req,res) => {
+app.post('/api/messages', (req,res, next) => {
   const body = req.body
 
   if (!body.name || !body.content || body.name.trim() === '' || body.content.trim() === '') {
@@ -58,26 +58,18 @@ app.post('/api/messages', (req,res) => {
     })
   }
 
-  const message = {
-    id: generateId(),
+  const message = new Message ({
     name: body.name.trim(),
     content: body.content.trim(),
-    createdAt: new Date().toISOString(),
-  }
+  })
 
-  messages = messages.concat(message)
-
-  res.status(201).json(message)
+  message.save()
+    .then(savedMessage => {res.status(201).json(savedMessage)})
+    .catch(next)
 })
 
-app.put('/api/messages/:id', (req,res) => {
-  const id = req.params.id
+app.put('/api/messages/:id', (req,res, next) => {
   const body = req.body
-  const message = messages.find(message => message.id === id)
-  
-  if (!message) {
-    return res.status(404).end()
-  }
 
   if (!body.content || body.content.trim() === '') {
     return res.status(400).json({
@@ -85,13 +77,18 @@ app.put('/api/messages/:id', (req,res) => {
     })
   }
 
-  const changedMessage = {
-    ...message,
-    content: body.content.trim(),
-  }
-
-  messages = messages.map(message => message.id === id ? changedMessage : message)
-  res.status(200).json(changedMessage)
+  Message.findByIdAndUpdate(req.params.id,
+    { content: body.content },
+    { returnDocument: 'after', runValidators: true }
+  )
+    .then(updatedMessage => {
+      if (updatedMessage) {
+        res.json(updatedMessage)
+      } else {
+        res.status(404).end()
+      }
+    })
+    .catch(next)
 }) 
 
 const unknownEndpoint = (req, res) => {
@@ -108,6 +105,18 @@ const errorHandler = (error, req, res, next) => {
   if (error.type === 'entity.parse.failed') {
     return res.status(400).json({
       error: 'malformed JSON'
+    })
+  }
+
+  if (error.name === 'CastError') {
+    return res.status(400).json({
+      error: 'malformatted id'
+    })
+  }
+
+  if (error.name === 'ValidationError') {
+    return res.status(400).json({
+      error: error.message
     })
   }
 
