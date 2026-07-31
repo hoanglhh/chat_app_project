@@ -157,41 +157,83 @@ const App = () => {
   }
 
   return (
-    <div className="app">
-      <h1>Chat App</h1>
+    <main className="h-dvh overflow-hidden bg-stone-100">
+      <div className="mx-auto h-full w-full max-w-3xl sm:p-4">
+        <section className="flex h-full min-h-0 flex-col overflow-hidden bg-white sm:rounded-2xl sm:border sm:border-slate-200 sm:shadow-sm">
+          <header className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-6">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white">
+                <svg
+                  aria-hidden="true"
+                  className="size-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M8.625 9.75h6.75m-6.75 3h4.5M21 12c0 4.142-4.03 7.5-9 7.5a10.7 10.7 0 0 1-3.17-.47L3 21l1.58-4.21A7 7 0 0 1 3 12c0-4.142 4.03-7.5 9-7.5s9 3.358 9 7.5Z"
+                  />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <h1 className="truncate text-base font-semibold text-slate-900">
+                  Chat
+                </h1>
+              </div>
+            </div>
 
-      <Notification notification={notification} />
+            <p className="ml-3 shrink-0 text-xs text-slate-500">
+              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+            </p>
+          </header>
 
-      <div className="chat-panel">
-        <div className="message-list">
-          {loading ? (
-            <p>Loading messages...</p>
-          ) : (
-            <>
-              <MessageList
-                messages={messages}
-                handleDelete={handleDelete}
-                currentName={name}
-                startEditing={startEditing}
-              />
+          <Notification notification={notification} />
+
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-4 py-5 sm:px-6">
+              {loading ? (
+                <div className="flex h-full min-h-48 items-center justify-center gap-2 text-sm text-slate-500">
+                  <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                  Loading messages…
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex h-full min-h-48 flex-col items-center justify-center px-6 text-center">
+                  <h2 className="text-sm font-medium text-slate-700">
+                    No messages yet
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Start the conversation below.
+                  </p>
+                </div>
+              ) : (
+                <MessageList
+                  messages={messages}
+                  handleDelete={handleDelete}
+                  currentName={name}
+                  startEditing={startEditing}
+                />
+              )}
               <div ref={messageEndRef} />
-            </>
-          )}
-        </div>
+            </div>
 
-        <MessageForm
-          addMessage={addMessage}
-          name={name}
-          content={content}
-          handleContentChange={handleContentChange}
-          handleNameChange={handleNameChange}
-          sending={sending}
-          saving={saving}
-          isEditing={isEditing}
-          cancelEditing={cancelEditing}
-        />
+            <MessageForm
+              addMessage={addMessage}
+              name={name}
+              content={content}
+              handleContentChange={handleContentChange}
+              handleNameChange={handleNameChange}
+              sending={sending}
+              saving={saving}
+              isEditing={isEditing}
+              cancelEditing={cancelEditing}
+            />
+          </div>
+        </section>
       </div>
-    </div>
+    </main>
   )
 }
 
