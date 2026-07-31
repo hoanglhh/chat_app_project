@@ -1,5 +1,7 @@
 import axios from 'axios'
-const baseUrl = 'http://localhost:3001/api/messages'
+const baseUrl =
+  import.meta.env.VITE_API_BASE_URL ||
+  'http://localhost:3001/api/messages'
 
 const remove = id => {
   return axios.delete(`${baseUrl}/${id}`)
