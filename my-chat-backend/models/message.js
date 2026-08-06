@@ -1,13 +1,5 @@
 const mongoose = require('mongoose')
 
-mongoose.connect(process.env.MONGODB_URI, { family: 4 })
-  .then(() => {
-    console.log('connected to MongoDB')
-  })
-  .catch(error => {
-    console.log('error connecting to MongoDB:', error.message)
-  })
-
 const messageSchema = new mongoose.Schema({
   name: {
     type: String,
