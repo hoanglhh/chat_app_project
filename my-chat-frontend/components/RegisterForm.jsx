@@ -1,6 +1,17 @@
-const LoginForm = ({ username, password, setUsername, setPassword, handleLogin}) => {
+const RegisterForm = ({ username, name, password, setUsername, setName, setPassword, handleRegister}) => {
   return (
-      <form onSubmit={handleLogin}>
+      <form onSubmit={handleRegister}>        
+        <div>
+          <label>
+            Name
+            <input
+              type="text"
+              value={name}
+              onChange={({ target }) => setName(target.value)}
+            />
+          </label>
+        </div>
+
         <div>
           <label>
             Username
@@ -11,6 +22,7 @@ const LoginForm = ({ username, password, setUsername, setPassword, handleLogin})
             />
           </label>
         </div>
+
         <div>
           <label>
             Password
@@ -21,9 +33,9 @@ const LoginForm = ({ username, password, setUsername, setPassword, handleLogin})
             />
           </label>
         </div>
-        <button type="submit">Login</button>
+        <button type="submit">Register</button>
       </form>
   )
 }
 
-export default LoginForm
+export default RegisterForm

@@ -5,6 +5,8 @@ import messageService from '../services/messages'
 import Notification from '../components/Notification'
 import LoginForm from '../components/LoginForm'
 import loginService from '../services/login'
+import userService from '../services/users'
+import RegisterForm from '../components/RegisterForm'
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
@@ -23,6 +25,10 @@ const App = () => {
       ? JSON.parse(savedUserJSON)
       : null
   })
+  const [registerUsername, setRegisterUsername] = useState('')
+  const [registerName, setRegisterName] = useState('')
+  const [registerPassword, setRegisterPassword] = useState('')
+  const [showRegistration, setShowRegistration] = useState(false)
   const messageEndRef = useRef(null)
   const [editingMessageId, setEditingMessageId] = useState(null)
   const isEditing = editingMessageId !== null
@@ -183,6 +189,29 @@ const App = () => {
     setUser(null)
   }
 
+  const handleRegister = async event => {
+    event.preventDefault()
+
+    try {
+      await userService.create({
+        username: registerUsername,
+        name: registerName,
+        password: registerPassword
+      })
+
+      showNotification('Account created. You can now log in.')
+      setUsername(registerUsername)
+      setRegisterUsername('')
+      setRegisterName('')
+      setRegisterPassword('')
+      setShowRegistration(false)
+    } catch (error) {
+      showNotification(
+        error.response?.data?.error || 'Failed to create account'
+      )
+    }
+  }
+
   return (
     <main className="h-dvh overflow-hidden bg-stone-100">
       <div className="mx-auto h-full w-full max-w-3xl sm:p-4">
@@ -238,15 +267,45 @@ const App = () => {
           
           {user === null ? (
           <div>
-            <h2>Login</h2>
+            {showRegistration ? (
+              <>
+                <RegisterForm 
+                  username={registerUsername}
+                  name={registerName}
+                  password={registerPassword}
+                  setUsername={setRegisterUsername}
+                  setName={setRegisterName}
+                  setPassword={setRegisterPassword}
+                  handleRegister={handleRegister}/>
 
-            <LoginForm
-              username={username}
-              password={password}
-              setUsername={setUsername}
-              setPassword={setPassword}
-              handleLogin={handleLogin}
-            />
+                  <button
+                    type="button"
+                    onClick={() => setShowRegistration(false)}
+                  >
+                    Back to login
+                  </button>
+              </>
+            ) : (
+              <>
+                <LoginForm
+                  username={username}
+                  password={password}
+                  setUsername={setUsername}
+                  setPassword={setPassword}
+                  handleLogin={handleLogin}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => setShowRegistration(true)}
+                >
+                  Create an account
+                </button>
+              </>
+            )}
+            
+
+
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
