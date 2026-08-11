@@ -6,7 +6,7 @@ const baseUrl = `${backendUrl}/api/messages`
 let token = null
 
 const setToken = newToken => {
-  token = `Bearer ${newToken}`
+  token = newToken ? `Bearer ${newToken}` : null
 }
 
 const getConfig = () => ({

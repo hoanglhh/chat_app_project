@@ -15,7 +15,14 @@ const App = () => {
   const [saving, setSaving] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState(() => {
+    const savedUserJSON =
+      window.localStorage.getItem('loggedChatUser')
+
+    return savedUserJSON
+      ? JSON.parse(savedUserJSON)
+      : null
+  })
   const messageEndRef = useRef(null)
   const [editingMessageId, setEditingMessageId] = useState(null)
   const isEditing = editingMessageId !== null
@@ -44,7 +51,11 @@ const App = () => {
       setLoading(false)
     })
 }, [])
-  
+
+  useEffect(() => {
+    messageService.setToken(user?.token ?? null)
+  }, [user])
+
   const addMessage = (event) => {
     event.preventDefault()
 
@@ -156,9 +167,20 @@ const App = () => {
       setUser(loggedInUser)
       setUsername('')
       setPassword('')
+      window.localStorage.setItem(
+        'loggedChatUser',
+        JSON.stringify(loggedInUser)
+      )
     } catch {
       showNotification('wrong credentials')
     }
+  }
+
+  const handleLogout = () => {
+    window.localStorage.removeItem('loggedChatUser')
+    setContent('')
+    setEditingMessageId(null)
+    setUser(null)
   }
 
   return (
@@ -190,9 +212,26 @@ const App = () => {
               </div>
             </div>
 
-            <p className="ml-3 shrink-0 text-xs text-slate-500">
-              {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-            </p>
+            <div className="ml-3 flex shrink-0 items-center gap-3">
+              <p className="hidden text-xs text-slate-500 sm:block">
+                {messages.length} {messages.length === 1 ? 'message' : 'messages'}
+              </p>
+
+              {user && (
+                <div className="flex items-center gap-2">
+                  <span className="max-w-28 truncate text-sm font-medium text-slate-700">
+                    {user.name || user.username}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  >
+                    Log out
+                  </button>
+                </div>
+              )}
+            </div>
           </header>
 
           <Notification notification={notification} />
