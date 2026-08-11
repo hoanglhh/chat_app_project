@@ -3,6 +3,8 @@ import MessageForm from "../components/MessageForm"
 import MessageList from "../components/MessageList"
 import messageService from '../services/messages'
 import Notification from '../components/Notification'
+import LoginForm from '../components/LoginForm'
+import loginService from '../services/login'
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
@@ -11,9 +13,9 @@ const App = () => {
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [name, setName] = useState(() => {
-    return window.localStorage.getItem('chatName') || ''
-  })
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [user, setUser] = useState(null)
   const messageEndRef = useRef(null)
   const [editingMessageId, setEditingMessageId] = useState(null)
   const isEditing = editingMessageId !== null
@@ -42,17 +44,11 @@ const App = () => {
       setLoading(false)
     })
 }, [])
-
-  useEffect(() => {
-    if (name.trim() !== '') {
-      window.localStorage.setItem('chatName', name)
-    }
-  }, [name])
   
   const addMessage = (event) => {
     event.preventDefault()
 
-    if (name.trim() === '' || content.trim() === '') {
+    if (content.trim() === '') {
       return
     }
 
@@ -62,7 +58,6 @@ const App = () => {
     } 
 
     const messageObject = {
-      name,
       content,
     }
     
@@ -101,10 +96,6 @@ const App = () => {
         }
       })
     }
-  }
-
-  const handleNameChange = (event) => {
-    setName(event.target.value)
   }
   
   const handleContentChange = (event) => {
@@ -156,6 +147,20 @@ const App = () => {
     setContent('')
   }
 
+  const handleLogin = async event => {
+    event.preventDefault()
+    
+    try {
+      const loggedInUser = await loginService.login({ username, password })
+      messageService.setToken(loggedInUser.token)
+      setUser(loggedInUser)
+      setUsername('')
+      setPassword('')
+    } catch {
+      showNotification('wrong credentials')
+    }
+  }
+
   return (
     <main className="h-dvh overflow-hidden bg-stone-100">
       <div className="mx-auto h-full w-full max-w-3xl sm:p-4">
@@ -191,7 +196,20 @@ const App = () => {
           </header>
 
           <Notification notification={notification} />
+          
+          {user === null ? (
+          <div>
+            <h2>Login</h2>
 
+            <LoginForm
+              username={username}
+              password={password}
+              setUsername={setUsername}
+              setPassword={setPassword}
+              handleLogin={handleLogin}
+            />
+          </div>
+        ) : (
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-4 py-5 sm:px-6">
               {loading ? (
@@ -212,7 +230,7 @@ const App = () => {
                 <MessageList
                   messages={messages}
                   handleDelete={handleDelete}
-                  currentName={name}
+                  currentName={user.name || user.username}
                   startEditing={startEditing}
                 />
               )}
@@ -221,16 +239,16 @@ const App = () => {
 
             <MessageForm
               addMessage={addMessage}
-              name={name}
               content={content}
               handleContentChange={handleContentChange}
-              handleNameChange={handleNameChange}
               sending={sending}
               saving={saving}
               isEditing={isEditing}
               cancelEditing={cancelEditing}
             />
           </div>
+        )}
+
         </section>
       </div>
     </main>
