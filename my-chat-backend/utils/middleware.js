@@ -31,13 +31,19 @@ const errorHandler = (error, req, res, next) => {
     return res.status(400).json({
       error: 'username must be unique'
     })
+  }
 
   if (error.name === 'TokenExpiredError') {
-    return response.status(401).json({
+    return res.status(401).json({
       error: 'token expired'
     })
   }
-}
+
+  if (error.name ===  'JsonWebTokenError') {
+    return res.status(401).json({ 
+      error: 'token invalid' 
+    })
+  }
 
   next(error)
 }
