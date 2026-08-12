@@ -9,6 +9,7 @@ const mongoose = require('mongoose')
 const middleware = require('./utils/middleware')
 const config = require('./utils/config')
 const logger = require('./utils/logger')
+const conversationsRouter = require('./controllers/conversations')
 
 
 logger.info('connecting to MongoDB')
@@ -28,6 +29,7 @@ app.use(morgan('tiny'))
 app.use('/api/messages', messagesRouter)
 app.use('/api/users', usersRouter)
 app.use('/api/login', loginRouter)
+app.use('/api/conversations', conversationsRouter)
 
 app.use(middleware.unknownEndpoint)
 app.use(middleware.errorHandler)
