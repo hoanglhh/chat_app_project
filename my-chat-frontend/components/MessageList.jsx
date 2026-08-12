@@ -1,6 +1,6 @@
 import Message from "./Message"
 
-const MessageList = ({ messages, handleDelete, currentName, startEditing }) => {
+const MessageList = ({ messages, handleDelete, currentUserId, startEditing }) => {
   return (
     <ul className="space-y-5" aria-label="Messages">
       {messages.map((message) => (
@@ -8,7 +8,7 @@ const MessageList = ({ messages, handleDelete, currentName, startEditing }) => {
           key={message.id}
           message={message}
           handleDelete={handleDelete}
-          currentName={currentName}
+          currentUserId={currentUserId}
           startEditing={startEditing}
         />
       ))}

@@ -328,7 +328,7 @@ const App = () => {
                 <MessageList
                   messages={messages}
                   handleDelete={handleDelete}
-                  currentName={user.name || user.username}
+                  currentUserId={user.id}
                   startEditing={startEditing}
                 />
               )}

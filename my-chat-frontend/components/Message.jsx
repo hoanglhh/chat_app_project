@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react"
 
-const Message = ({ message, handleDelete, currentName, startEditing }) => {
+const Message = ({ message, handleDelete, currentUserId, startEditing }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [menuPlacement, setMenuPlacement] = useState('top')
   const menuRef = useRef(null)
-  const isOwnMessage = message.name === currentName.trim()
+  const isOwnMessage = message.user === currentUserId
   const createdAt = new Date(message.createdAt)
   const formattedTime = Number.isNaN(createdAt.getTime())
     ? ''
