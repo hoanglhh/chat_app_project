@@ -97,6 +97,20 @@ describe('users and login', () => {
     assert.equal(response.body.error, 'username must be unique')
   })
 
+  test('registration requires a name', async () => {
+    const response = await api
+      .post('/api/users')
+      .send({
+        username: 'charlie',
+        name: '   ',
+        password: 'secret123'
+      })
+      .expect(400)
+
+    assert.equal(response.body.error, 'name, username and password are required')
+    assert.equal(await User.countDocuments({}), 2)
+  })
+
   test('valid credentials return a token and user id', async () => {
     const response = await api
       .post('/api/login')

@@ -34,11 +34,11 @@ const App = () => {
   const [editingMessageId, setEditingMessageId] = useState(null)
   const isEditing = editingMessageId !== null
   
-  const showNotification = (message) => {
-    setNotification({ message })
+  const showNotification = (message, type = 'error') => {
+    setNotification({ message, type })
 
     setTimeout(() => {
-      setNotification({ message: null })
+      setNotification({ message: null, type: 'error' })
     }, 5000)
   }
 
@@ -47,17 +47,21 @@ const App = () => {
   }, [messages])
 
   useEffect(() => {
+    if (!user) {
+      return
+    }
+
     messageService.getAll()
-    .then(initialMessages => {
-      setMessages(initialMessages)
-  })
-    .catch(() => {
-      showNotification('Failed to load messages')
-    })
-    .finally(() => {
-      setLoading(false)
-    })
-}, [])
+      .then(initialMessages => {
+        setMessages(initialMessages)
+      })
+      .catch(() => {
+        showNotification('Failed to load messages')
+      })
+      .finally(() => {
+        setLoading(false)
+      })
+  }, [user])
 
   useEffect(() => {
     messageService.setToken(user?.token ?? null)
@@ -262,7 +266,7 @@ const App = () => {
         password: registerPassword
       })
 
-      showNotification('Account created. You can now log in.')
+      showNotification('Account created. You can now log in.', 'success')
       setUsername(registerUsername)
       setRegisterUsername('')
       setRegisterName('')
@@ -304,71 +308,73 @@ const App = () => {
               </div>
             </div>
 
-            <div className="ml-3 flex shrink-0 items-center gap-3">
-              <p className="hidden text-xs text-slate-500 sm:block">
-                {messages.length} {messages.length === 1 ? 'message' : 'messages'}
-              </p>
-
-              {user && (
-                <div className="flex items-center gap-2">
-                  <span className="max-w-28 truncate text-sm font-medium text-slate-700">
-                    {user.name || user.username}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                  >
-                    Log out
-                  </button>
-                </div>
-              )}
-            </div>
+            {user && (
+              <div className="ml-3 flex shrink-0 items-center gap-2">
+                <span className="max-w-28 truncate text-sm font-medium text-slate-700">
+                  {user.name || user.username}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                >
+                  Log out
+                </button>
+              </div>
+            )}
           </header>
 
           <Notification notification={notification} />
-          
+
           {user === null ? (
-          <div>
-            {showRegistration ? (
-              <>
-                <RegisterForm 
-                  username={registerUsername}
-                  name={registerName}
-                  password={registerPassword}
-                  setUsername={setRegisterUsername}
-                  setName={setRegisterName}
-                  setPassword={setRegisterPassword}
-                  handleRegister={handleRegister}/>
+          <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-4 py-8 sm:px-6">
+            <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
+              {showRegistration ? (
+                <>
+                  <RegisterForm
+                    username={registerUsername}
+                    name={registerName}
+                    password={registerPassword}
+                    setUsername={setRegisterUsername}
+                    setName={setRegisterName}
+                    setPassword={setRegisterPassword}
+                    handleRegister={handleRegister}
+                  />
 
-                  <button
-                    type="button"
-                    onClick={() => setShowRegistration(false)}
-                  >
-                    Back to login
-                  </button>
-              </>
-            ) : (
-              <>
-                <LoginForm
-                  username={username}
-                  password={password}
-                  setUsername={setUsername}
-                  setPassword={setPassword}
-                  handleLogin={handleLogin}
-                />
+                  <p className="mt-6 text-center text-sm text-slate-500">
+                    Already have an account?{' '}
+                    <button
+                      type="button"
+                      className="font-medium text-blue-600 hover:text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      onClick={() => setShowRegistration(false)}
+                    >
+                      Log in
+                    </button>
+                  </p>
+                </>
+              ) : (
+                <>
+                  <LoginForm
+                    username={username}
+                    password={password}
+                    setUsername={setUsername}
+                    setPassword={setPassword}
+                    handleLogin={handleLogin}
+                  />
 
-                <button
-                  type="button"
-                  onClick={() => setShowRegistration(true)}
-                >
-                  Create an account
-                </button>
-              </>
-            )}
-            
-
-
+                  <p className="mt-6 text-center text-sm text-slate-500">
+                    New here?{' '}
+                    <button
+                      type="button"
+                      className="font-medium text-blue-600 hover:text-blue-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      onClick={() => setShowRegistration(true)}
+                    >
+                      Create an account
+                    </button>
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">

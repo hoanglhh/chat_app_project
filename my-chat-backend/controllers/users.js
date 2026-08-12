@@ -5,10 +5,11 @@ const User = require('../models/user')
 usersRouter.post('/', async (req, res) => {
   const { username, name, password } = req.body
   const trimmedUsername = username?.trim()
+  const trimmedName = name?.trim()
 
-  if (!trimmedUsername || !password) {
+  if (!trimmedUsername || !trimmedName || !password) {
     return res.status(400).json({
-      error: 'username and password are required'
+      error: 'name, username and password are required'
     })
   }
 
@@ -23,7 +24,7 @@ usersRouter.post('/', async (req, res) => {
 
   const user = new User({
     username: trimmedUsername,
-    name,
+    name: trimmedName,
     passwordHash,
   })
 
