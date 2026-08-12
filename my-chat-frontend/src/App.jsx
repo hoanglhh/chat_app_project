@@ -7,6 +7,7 @@ import LoginForm from '../components/LoginForm'
 import loginService from '../services/login'
 import userService from '../services/users'
 import RegisterForm from '../components/RegisterForm'
+import socket from '../services/socket'
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
@@ -61,6 +62,68 @@ const App = () => {
   useEffect(() => {
     messageService.setToken(user?.token ?? null)
   }, [user])
+
+  useEffect(() => {
+    const handleConnect = () => {
+      console.log('Socket connected:', socket.id)
+    }
+
+    const handleDisconnect = () => {
+      console.log('Socket disconnected')
+    }
+
+    socket.on('connect', handleConnect)
+    socket.on('disconnect', handleDisconnect)
+
+    return () => {
+      socket.off('connect', handleConnect)
+      socket.off('disconnect', handleDisconnect)
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleMessageCreated = newMessage => {
+      setMessages(currentMessages => {
+        const alreadyExists = currentMessages.some(
+          message => message.id === newMessage.id
+        )
+
+        return alreadyExists
+        ? currentMessages
+        : currentMessages.concat(newMessage)
+      })
+    }
+
+    socket.on('message:created', handleMessageCreated)
+
+    const handleMessageUpdated = updatedMessage => {
+      setMessages(currentMessages =>
+        currentMessages.map(message =>
+          message.id === updatedMessage.id
+            ? updatedMessage
+            : message
+        )
+      )
+    }
+
+    socket.on('message:updated', handleMessageUpdated)
+
+    const handleMessageDeleted = deletedMessageId => {
+      setMessages(currentMessages =>
+        currentMessages.filter(
+          message => message.id !== deletedMessageId
+        )
+      )
+    }
+
+    socket.on('message:deleted', handleMessageDeleted)
+
+    return () => {
+      socket.off('message:created', handleMessageCreated)
+      socket.off('message:updated', handleMessageUpdated)
+      socket.off('message:deleted', handleMessageDeleted)
+    }
+  }, [])
 
   const addMessage = (event) => {
     event.preventDefault()

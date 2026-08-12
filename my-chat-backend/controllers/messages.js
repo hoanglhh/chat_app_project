@@ -57,11 +57,15 @@ messagesRouter.delete('/:id', async (req,res, next) => {
     $pull: { messages: message._id }
   })
 
+  const io = req.app.get('io')
+  io.emit('message:deleted', message.id)
+
   res.status(204).end()
 })
 
 messagesRouter.post('/', async (req,res, next) => {
   const body = req.body
+  const io = req.app.get('io')
 
   const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
   if (!decodedToken.id) {
@@ -90,6 +94,8 @@ messagesRouter.post('/', async (req,res, next) => {
   })
 
   const savedMessage = await message.save()
+
+  io.emit('message:created', savedMessage.toJSON())
 
   user.messages = user.messages.concat(savedMessage._id)
   await user.save()
@@ -127,6 +133,10 @@ messagesRouter.put('/:id', async (req,res, next) => {
   message.content = body.content.trim()
 
   const updatedMessage = await message.save()
+
+  const io = req.app.get('io')
+  io.emit('message:updated', updatedMessage.toJSON())
+
   res.status(200).json(updatedMessage)
 }) 
 
