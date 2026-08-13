@@ -6,9 +6,14 @@ const backendUrl =
 
 const baseUrl = `${backendUrl}/api/users`
 
+const getAll = () => {
+  return axios.get(baseUrl)
+  .then(response => response.data)
+}
+
 const create = async credentials => {
   const res = await axios.post(baseUrl, credentials)
   return res.data
 }
 
-export default { create }
+export default { create, getAll }

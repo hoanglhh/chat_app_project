@@ -1,19 +1,20 @@
 import { useState, useEffect, useRef } from "react"
 import MessageForm from "../components/MessageForm"
 import MessageList from "../components/MessageList"
-import messageService from '../services/messages'
 import Notification from '../components/Notification'
 import LoginForm from '../components/LoginForm'
 import loginService from '../services/login'
 import userService from '../services/users'
 import RegisterForm from '../components/RegisterForm'
 import socket from '../services/socket'
+import conversationService from '../services/conversations'
+import ConversationList from "../components/ConversationList"
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
   const [content, setContent] = useState('')
   const [notification, setNotification] = useState({ message: null })
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [sending, setSending] = useState(false)
   const [saving, setSaving] = useState(false)
   const [username, setUsername] = useState('')
@@ -26,6 +27,9 @@ const App = () => {
       ? JSON.parse(savedUserJSON)
       : null
   })
+  const [users, setUsers] = useState([])
+  const [conversations, setConversations] = useState([])
+  const [selectedConversationId, setSelectedConversationId] = useState(null)
   const [registerUsername, setRegisterUsername] = useState('')
   const [registerName, setRegisterName] = useState('')
   const [registerPassword, setRegisterPassword] = useState('')
@@ -42,30 +46,56 @@ const App = () => {
     }, 5000)
   }
 
+  const selectConversation = conversationId => {
+    if (conversationId === selectedConversationId) {
+      return
+    }
+
+    setMessages([])
+    setLoading(true)
+    setEditingMessageId(null)
+    setContent('')
+    setSelectedConversationId(conversationId)
+  }
+
+  const handleLogout = () => {
+    window.localStorage.removeItem('loggedChatUser')
+    setContent('')
+    setEditingMessageId(null)
+    setMessages([])
+    setConversations([])
+    setUsers([])
+    setSelectedConversationId(null)
+    setUser(null)
+  }
+
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   useEffect(() => {
-    if (!user) {
+    if (!user || !selectedConversationId) {
       return
     }
 
-    messageService.getAll()
-      .then(initialMessages => {
-        setMessages(initialMessages)
+    conversationService
+      .getMessages(selectedConversationId)
+      .then(conversationMessages => {
+        setMessages(conversationMessages)
       })
-      .catch(() => {
+      .catch(error => {
+        if (error.response?.status === 401) {
+          handleLogout()
+          showNotification('Your session expired. Please log in again.')
+          return
+        }
+
         showNotification('Failed to load messages')
       })
       .finally(() => {
         setLoading(false)
       })
-  }, [user])
-
-  useEffect(() => {
-    messageService.setToken(user?.token ?? null)
-  }, [user])
+  }, [user, selectedConversationId])
 
   useEffect(() => {
     const handleConnect = () => {
@@ -129,8 +159,97 @@ const App = () => {
     }
   }, [])
 
+  useEffect(() => {
+    if (!user) {
+      socket.disconnect()
+      return
+    }
+
+    socket.auth = {
+      token: user.token
+    }
+
+    socket.connect()
+
+    return () => {
+      socket.disconnect()
+    }
+  }, [user])
+
+  useEffect(() => {
+    const token = user?.token ?? null
+
+    conversationService.setToken(token)
+  }, [user])
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    Promise.all([
+      userService.getAll(),
+      conversationService.getAll()
+    ])
+      .then(([allUsers, initialConversations]) => {
+        setUsers(
+          allUsers.filter(otherUser => otherUser.id !== user.id)
+        )
+        setConversations(initialConversations)
+      })
+      .catch(error => {
+        if (error.response?.status === 401) {
+          window.localStorage.removeItem('loggedChatUser')
+          setUser(null)
+          setMessages([])
+          setConversations([])
+          showNotification('Your session expired. Please log in again.')
+          return
+        }
+
+        showNotification('Failed to load conversations')
+      })
+  }, [user])
+
+  useEffect(() => {
+    if (!user || !selectedConversationId) {
+      return
+    }
+
+    const joinConversation = () => {
+      socket.emit(
+        'conversation:join',
+        selectedConversationId,
+        response => {
+          if (response?.error) {
+            showNotification(response.error)
+          }
+        }
+      )
+    }
+
+    if (socket.connected) {
+      joinConversation()
+    }
+
+    socket.on('connect', joinConversation)
+
+    return () => {
+      socket.off('connect', joinConversation)
+      socket.emit(
+        'conversation:leave',
+        selectedConversationId
+      )
+    }
+  }, [user, selectedConversationId])
+
   const addMessage = (event) => {
     event.preventDefault()
+
+    if (!selectedConversationId) {
+      showNotification('Select a conversation first')
+      return
+    }
 
     if (content.trim() === '') {
       return
@@ -147,38 +266,51 @@ const App = () => {
     
     setSending(true)
     
-    messageService
-    .create(messageObject)
-    .then(returnedMessage => {
-      setMessages(messages.concat(returnedMessage))
-      setContent('')
-    })
-    .catch(error => {
-      if (error.response && error.response.status === 400) {
-        showNotification(error.response.data.error)
-      } else {
-        showNotification('Failed to send message')
-      }
-    })
-    .finally(() => {
-      setSending(false)
-    })
-  }
+    conversationService
+      .createMessage(selectedConversationId, messageObject)
+      .then(returnedMessage => {
+        setMessages(currentMessages => {
+          const alreadyExists = currentMessages.some(
+            message => message.id === returnedMessage.id
+          )
 
-  const handleDelete = (id) => {
-    if (window.confirm('Delete this message?')) {
-      messageService
-      .remove(id)
-      .then(() => {
-        setMessages(messages.filter(message => message.id !== id))
+          return alreadyExists
+            ? currentMessages
+            : currentMessages.concat(returnedMessage)
+        })
+        setContent('')
       })
       .catch(error => {
         if (error.response && error.response.status === 400) {
           showNotification(error.response.data.error)
         } else {
-          showNotification('Failed! - Try deleting again')
+          showNotification('Failed to send message')
         }
       })
+      .finally(() => {
+        setSending(false)
+      })
+  }
+
+  const handleDelete = (id) => {
+    if (window.confirm('Delete this message?')) {
+      conversationService
+        .removeMessage(
+          selectedConversationId,
+          id
+        )
+        .then(() => {
+          setMessages(currentMessages =>
+            currentMessages.filter(message => message.id !== id)
+          )
+        })
+        .catch(error => {
+          if (error.response && error.response.status === 400) {
+            showNotification(error.response.data.error)
+          } else {
+            showNotification('Failed! - Try deleting again')
+          }
+        })
     }
   }
   
@@ -186,40 +318,39 @@ const App = () => {
     setContent(event.target.value)
   }
 
-  const handleEdit = (id, newContent) => {
-    const editMessage = messages.find(message => message.id === id)
-    
+  const handleEdit = (id, newContent) => {    
     if (newContent.trim() === '') {
       return
-    }
-    
-    const changedMessage = {
-      ...editMessage,
-      content: newContent
     }
 
     setSaving(true)
 
-    return messageService
-    .update(id, changedMessage)
-    .then(returnedMessage => {
-      setMessages(messages.map(message => 
-        message.id === id ? returnedMessage : message
-      ))
-      setEditingMessageId(null)
-      setContent('')
-    })
-    .catch(error => {
-      if (error.response && error.response.status === 400) {
-        showNotification(error.response.data.error)
-      } else {
-        showNotification('This message has already been deleted')
-      }
-    })
-    .finally(() => {
-      setSaving(false)
-    })
-  }
+    return conversationService
+      .updateMessage(
+        selectedConversationId,
+        id,
+        { content: newContent }
+      )
+      .then(returnedMessage => {
+        setMessages(currentMessages =>
+          currentMessages.map(message =>
+            message.id === id ? returnedMessage : message
+          )
+        )
+        setEditingMessageId(null)
+        setContent('')
+      })
+      .catch(error => {
+        if (error.response && error.response.status === 400) {
+          showNotification(error.response.data.error)
+        } else {
+          showNotification('This message has already been deleted')
+        }
+      })
+      .finally(() => {
+        setSaving(false)
+      })
+    }
 
   const startEditing = (message) => {
     setEditingMessageId(message.id)
@@ -236,7 +367,6 @@ const App = () => {
     
     try {
       const loggedInUser = await loginService.login({ username, password })
-      messageService.setToken(loggedInUser.token)
       setUser(loggedInUser)
       setUsername('')
       setPassword('')
@@ -247,13 +377,6 @@ const App = () => {
     } catch {
       showNotification('wrong credentials')
     }
-  }
-
-  const handleLogout = () => {
-    window.localStorage.removeItem('loggedChatUser')
-    setContent('')
-    setEditingMessageId(null)
-    setUser(null)
   }
 
   const handleRegister = async event => {
@@ -275,6 +398,29 @@ const App = () => {
     } catch (error) {
       showNotification(
         error.response?.data?.error || 'Failed to create account'
+      )
+    }
+  }
+
+  const startConversation = async participantId => {
+    try {
+      const conversation =
+        await conversationService.create(participantId)
+
+      setConversations(currentConversations => {
+        const alreadyExists = currentConversations.some(
+          item => item.id === conversation.id
+        )
+
+        return alreadyExists
+          ? currentConversations
+          : currentConversations.concat(conversation)
+      })
+
+      selectConversation(conversation.id)
+    } catch (error) {
+      showNotification(
+        error.response?.data?.error || 'Failed to start conversation'
       )
     }
   }
@@ -378,8 +524,37 @@ const App = () => {
           </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 space-y-4 border-b border-slate-200 px-4 py-3">
+              <ConversationList
+                conversations={conversations}
+                currentUserId={user.id}
+                selectedConversationId={selectedConversationId}
+                onSelect={selectConversation}
+              />
+
+              <h2 className="mb-2 text-sm font-semibold text-slate-700">
+                Start a conversation
+              </h2>
+
+              <div className="flex gap-2 overflow-x-auto">
+                {users.map(otherUser => (
+                  <button
+                    key={otherUser.id}
+                    type="button"
+                    onClick={() => startConversation(otherUser.id)}
+                    className="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200"
+                  >
+                    {otherUser.name} (@{otherUser.username})
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-4 py-5 sm:px-6">
-              {loading ? (
+              {!selectedConversationId ? (
+                <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                  Select a conversation to start chatting.
+                </div>
+              ) : loading ? (
                 <div className="flex h-full min-h-48 items-center justify-center gap-2 text-sm text-slate-500">
                   <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
                   Loading messages…
