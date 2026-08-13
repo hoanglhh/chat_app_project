@@ -13,6 +13,7 @@ if (!process.env.TEST_MONGODB_URI) {
 }
 
 const app = require('../app')
+const Conversation = require('../models/conversation')
 const Message = require('../models/message')
 const User = require('../models/user')
 
@@ -20,13 +21,16 @@ const api = supertest(app)
 const emittedEvents = []
 
 app.set('io', {
-  emit: (event, payload) => {
-    emittedEvents.push({ event, payload })
-  }
+  to: room => ({
+    emit: (event, payload) => {
+      emittedEvents.push({ room, event, payload })
+    }
+  })
 })
 
 let alice
 let bob
+let conversation
 
 const loginAs = async (username, password = 'secret123') => {
   const response = await api
@@ -37,9 +41,13 @@ const loginAs = async (username, password = 'secret123') => {
   return response.body.token
 }
 
-const createMessageAs = async (token, content = 'Hello from Alice') => {
+const createMessageAs = async (
+  token,
+  conversationId = conversation.id,
+  content = 'Hello from Alice'
+) => {
   return api
-    .post('/api/messages')
+    .post(`/api/conversations/${conversationId}/messages`)
     .set('Authorization', `Bearer ${token}`)
     .send({ content })
     .expect(201)
@@ -48,6 +56,7 @@ const createMessageAs = async (token, content = 'Hello from Alice') => {
 beforeEach(async () => {
   await mongoose.connection.asPromise()
   await Message.deleteMany({})
+  await Conversation.deleteMany({})
   await User.deleteMany({})
 
   const passwordHash = await bcrypt.hash('secret123', 4)
@@ -62,6 +71,12 @@ beforeEach(async () => {
     username: 'bob',
     name: 'Bob',
     passwordHash
+  }).save()
+
+  conversation = await new Conversation({
+    type: 'direct',
+    participants: [alice._id, bob._id],
+    createdBy: alice._id
   }).save()
 
   emittedEvents.length = 0
@@ -130,30 +145,91 @@ describe('users and login', () => {
   })
 })
 
-describe('message authorization and real-time events', () => {
+describe('direct conversations', () => {
+  test('a user can list only conversations they participate in', async () => {
+    const aliceToken = await loginAs('alice')
+
+    const response = await api
+      .get('/api/conversations')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .expect(200)
+
+    assert.equal(response.body.length, 1)
+    assert.equal(response.body[0].id, conversation.id)
+    assert.equal(response.body[0].participants.length, 2)
+  })
+
+  test('creating the same direct conversation returns the existing one', async () => {
+    const aliceToken = await loginAs('alice')
+
+    const response = await api
+      .post('/api/conversations')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({ participantId: bob.id })
+      .expect(200)
+
+    assert.equal(response.body.id, conversation.id)
+    assert.equal(await Conversation.countDocuments({}), 1)
+  })
+})
+
+describe('conversation-scoped messages', () => {
   test('creating a message requires a token', async () => {
     await api
-      .post('/api/messages')
+      .post(`/api/conversations/${conversation.id}/messages`)
       .send({ content: 'This must fail' })
       .expect(401)
 
     assert.equal(await Message.countDocuments({}), 0)
   })
 
-  test('an authenticated user can create a message', async () => {
-    const token = await loginAs('alice')
-    const response = await createMessageAs(token)
+  test('a participant can create and load a message', async () => {
+    const aliceToken = await loginAs('alice')
+    const response = await createMessageAs(aliceToken)
 
     assert.equal(response.body.content, 'Hello from Alice')
     assert.equal(response.body.name, 'Alice')
     assert.equal(response.body.user, alice.id)
+    assert.equal(response.body.conversation, conversation.id)
 
     const savedUser = await User.findById(alice.id)
     assert.equal(savedUser.messages[0].toString(), response.body.id)
 
     assert.equal(emittedEvents.length, 1)
+    assert.equal(emittedEvents[0].room, conversation.id)
     assert.equal(emittedEvents[0].event, 'message:created')
     assert.equal(emittedEvents[0].payload.id, response.body.id)
+
+    const messages = await api
+      .get(`/api/conversations/${conversation.id}/messages`)
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .expect(200)
+
+    assert.equal(messages.body.length, 1)
+    assert.equal(messages.body[0].id, response.body.id)
+  })
+
+  test('a user outside the conversation cannot read or create messages', async () => {
+    const passwordHash = await bcrypt.hash('secret123', 4)
+    await new User({
+      username: 'charlie',
+      name: 'Charlie',
+      passwordHash
+    }).save()
+    const charlieToken = await loginAs('charlie')
+
+    await api
+      .get(`/api/conversations/${conversation.id}/messages`)
+      .set('Authorization', `Bearer ${charlieToken}`)
+      .expect(403)
+
+    await api
+      .post(`/api/conversations/${conversation.id}/messages`)
+      .set('Authorization', `Bearer ${charlieToken}`)
+      .send({ content: 'Charlie must not send this' })
+      .expect(403)
+
+    assert.equal(await Message.countDocuments({}), 0)
   })
 
   test('only the owner can edit a message', async () => {
@@ -164,19 +240,20 @@ describe('message authorization and real-time events', () => {
     emittedEvents.length = 0
 
     await api
-      .put(`/api/messages/${created.body.id}`)
+      .put(`/api/conversations/${conversation.id}/messages/${created.body.id}`)
       .set('Authorization', `Bearer ${bobToken}`)
       .send({ content: 'Bob tried to edit this' })
       .expect(403)
 
     const response = await api
-      .put(`/api/messages/${created.body.id}`)
+      .put(`/api/conversations/${conversation.id}/messages/${created.body.id}`)
       .set('Authorization', `Bearer ${aliceToken}`)
       .send({ content: 'Alice edited this' })
       .expect(200)
 
     assert.equal(response.body.content, 'Alice edited this')
     assert.equal(emittedEvents.length, 1)
+    assert.equal(emittedEvents[0].room, conversation.id)
     assert.equal(emittedEvents[0].event, 'message:updated')
     assert.equal(emittedEvents[0].payload.id, created.body.id)
   })
@@ -189,14 +266,14 @@ describe('message authorization and real-time events', () => {
     emittedEvents.length = 0
 
     await api
-      .delete(`/api/messages/${created.body.id}`)
+      .delete(`/api/conversations/${conversation.id}/messages/${created.body.id}`)
       .set('Authorization', `Bearer ${bobToken}`)
       .expect(403)
 
     assert.notEqual(await Message.findById(created.body.id), null)
 
     await api
-      .delete(`/api/messages/${created.body.id}`)
+      .delete(`/api/conversations/${conversation.id}/messages/${created.body.id}`)
       .set('Authorization', `Bearer ${aliceToken}`)
       .expect(204)
 
@@ -206,6 +283,7 @@ describe('message authorization and real-time events', () => {
     assert.equal(savedUser.messages.length, 0)
 
     assert.equal(emittedEvents.length, 1)
+    assert.equal(emittedEvents[0].room, conversation.id)
     assert.equal(emittedEvents[0].event, 'message:deleted')
     assert.equal(emittedEvents[0].payload, created.body.id)
   })
