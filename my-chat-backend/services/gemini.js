@@ -46,4 +46,38 @@ const summarizeMessages = async messages => {
     .trim()
 }
 
-module.exports = { summarizeMessages }
+const generateAiReply = async messages => {
+  const contents = messages.map(message => ({
+    role: message.role === 'assistant'
+      ? 'model'
+      : 'user',
+    parts: [
+      {
+        text: message.content
+      }
+    ]
+  }))
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.5-flash-lite',
+    contents,
+    config: {
+      systemInstruction: `
+        You are Gemini, a helpful assistant inside a chat application.
+        Answer naturally and concisely.
+        Use plain text because the chat does not render Markdown.
+        Never pretend to be a human participant.
+      `.trim()
+    }
+  })
+
+  const reply = response.text?.trim()
+
+  if (!reply) {
+    throw new Error('Gemini returned an empty response')
+  }
+
+  return reply
+}
+
+module.exports = { summarizeMessages, generateAiReply }

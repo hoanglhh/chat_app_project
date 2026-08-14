@@ -18,15 +18,18 @@ const ConversationList = ({
   return (
     <nav className="space-y-1" aria-label="Conversations">
       {conversations.map(conversation => {
+        const isAiConversation = conversation.type === 'ai'
         const otherParticipant = conversation.participants.find(
           participant => participant.id !== currentUserId
         )
 
-        if (!otherParticipant) {
+        if (!isAiConversation && !otherParticipant) {
           return null
         }
 
-        const displayName = otherParticipant.name || otherParticipant.username
+        const displayName = isAiConversation
+          ? conversation.name || 'Gemini'
+          : otherParticipant.name || otherParticipant.username
         const initial = displayName.charAt(0).toUpperCase()
         const isSelected = conversation.id === selectedConversationId
 
@@ -47,10 +50,27 @@ const ConversationList = ({
               className={`flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
                 isSelected
                   ? 'bg-white/20 text-white'
-                  : 'bg-blue-100 text-blue-700'
+                  : isAiConversation
+                    ? 'bg-violet-100 text-violet-700'
+                    : 'bg-blue-100 text-blue-700'
               }`}
             >
-              {initial}
+              {isAiConversation ? (
+                <svg
+                  aria-hidden="true"
+                  className="size-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="m12 3 .8 2.2A5.8 5.8 0 0 0 16.3 8.7l2.2.8-2.2.8a5.8 5.8 0 0 0-3.5 3.5L12 16l-.8-2.2a5.8 5.8 0 0 0-3.5-3.5l-2.2-.8 2.2-.8a5.8 5.8 0 0 0 3.5-3.5L12 3Z"
+                  />
+                </svg>
+              ) : initial}
             </span>
 
             <span className="min-w-0 flex-1">
@@ -62,7 +82,9 @@ const ConversationList = ({
                   isSelected ? 'text-blue-100' : 'text-slate-500'
                 }`}
               >
-                @{otherParticipant.username}
+                {isAiConversation
+                  ? 'AI assistant'
+                  : `@${otherParticipant.username}`}
               </span>
             </span>
           </button>

@@ -12,6 +12,23 @@ import ConversationList from "../components/ConversationList"
 import NewConversationModal from '../components/NewConversationModal'
 import SummaryModal from '../components/SummaryModal'
 
+const appendUniqueMessages = (currentMessages, incomingMessages) => {
+  const messageIds = new Set(
+    currentMessages.map(message => message.id)
+  )
+
+  const uniqueMessages = incomingMessages.filter(message => {
+    if (!message || messageIds.has(message.id)) {
+      return false
+    }
+
+    messageIds.add(message.id)
+    return true
+  })
+
+  return currentMessages.concat(uniqueMessages)
+}
+
 const App = () => {
   const [messages, setMessages] = useState([]) 
   const [content, setContent] = useState('')
@@ -43,6 +60,8 @@ const App = () => {
   const [summary, setSummary] = useState(null)
   const [summarizing, setSummarizing] = useState(false)
   const [isSummaryOpen, setIsSummaryOpen] = useState(false)
+  const [aiRespondingConversationId, setAiRespondingConversationId] = useState(null)
+  const selectedConversationIdRef = useRef(null)
   
   const showNotification = (message, type = 'error') => {
     setNotification({ message, type })
@@ -61,6 +80,7 @@ const App = () => {
     setLoading(true)
     setEditingMessageId(null)
     setContent('')
+    selectedConversationIdRef.current = conversationId
     setSelectedConversationId(conversationId)
     setSummary(null)
     setIsSummaryOpen(false)
@@ -73,6 +93,7 @@ const App = () => {
     setContent('')
     setSummary(null)
     setIsSummaryOpen(false)
+    selectedConversationIdRef.current = null
     setSelectedConversationId(null)
   }
 
@@ -83,7 +104,9 @@ const App = () => {
     setMessages([])
     setConversations([])
     setUsers([])
+    selectedConversationIdRef.current = null
     setSelectedConversationId(null)
+    setAiRespondingConversationId(null)
     setIsNewConversationOpen(false)
     setUser(null)
     setSummary(null)
@@ -92,17 +115,21 @@ const App = () => {
 
   useEffect(() => {
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, aiRespondingConversationId])
 
   useEffect(() => {
     if (!user || !selectedConversationId) {
       return
     }
 
+    const conversationId = selectedConversationId
+
     conversationService
-      .getMessages(selectedConversationId)
+      .getMessages(conversationId)
       .then(conversationMessages => {
-        setMessages(conversationMessages)
+        if (selectedConversationIdRef.current === conversationId) {
+          setMessages(conversationMessages)
+        }
       })
       .catch(error => {
         if (error.response?.status === 401) {
@@ -111,10 +138,14 @@ const App = () => {
           return
         }
 
-        showNotification('Failed to load messages')
+        if (selectedConversationIdRef.current === conversationId) {
+          showNotification('Failed to load messages')
+        }
       })
       .finally(() => {
-        setLoading(false)
+        if (selectedConversationIdRef.current === conversationId) {
+          setLoading(false)
+        }
       })
   }, [user, selectedConversationId])
 
@@ -138,14 +169,12 @@ const App = () => {
 
   useEffect(() => {
     const handleMessageCreated = newMessage => {
-      setMessages(currentMessages => {
-        const alreadyExists = currentMessages.some(
-          message => message.id === newMessage.id
-        )
+      if (newMessage.conversation !== selectedConversationIdRef.current) {
+        return
+      }
 
-        return alreadyExists
-        ? currentMessages
-        : currentMessages.concat(newMessage)
+      setMessages(currentMessages => {
+        return appendUniqueMessages(currentMessages, [newMessage])
       })
     }
 
@@ -210,13 +239,19 @@ const App = () => {
 
     Promise.all([
       userService.getAll(),
-      conversationService.getAll()
+      conversationService.getAll(),
+      conversationService.getOrCreateAiConversation()
     ])
-      .then(([allUsers, initialConversations]) => {
+      .then(([allUsers, initialConversations, aiConversation]) => {
         setUsers(
           allUsers.filter(otherUser => otherUser.id !== user.id)
         )
-        setConversations(initialConversations)
+        setConversations([
+          aiConversation,
+          ...initialConversations.filter(
+            conversation => conversation.id !== aiConversation.id
+          )
+        ])
       })
       .catch(error => {
         if (error.response?.status === 401) {
@@ -284,21 +319,91 @@ const App = () => {
     const messageObject = {
       content,
     }
+
+    const activeConversation = conversations.find(
+      conversation => conversation.id === selectedConversationId
+    )
+
+    if (activeConversation?.type === 'ai') {
+      const conversationId = selectedConversationId
+      const submittedContent = content
+
+      setContent('')
+      setAiRespondingConversationId(conversationId)
+
+      conversationService
+        .createAiMessage(conversationId, messageObject)
+        .then(({ userMessage, assistantMessage }) => {
+          if (selectedConversationIdRef.current !== conversationId) {
+            return
+          }
+
+          setMessages(currentMessages =>
+            appendUniqueMessages(
+              currentMessages,
+              [userMessage, assistantMessage]
+            )
+          )
+        })
+        .catch(error => {
+          const savedUserMessage = error.response?.data?.userMessage
+          const isStillSelected =
+            selectedConversationIdRef.current === conversationId
+
+          if (savedUserMessage && isStillSelected) {
+            setMessages(currentMessages =>
+              appendUniqueMessages(currentMessages, [savedUserMessage])
+            )
+          } else if (isStillSelected) {
+            setContent(submittedContent)
+          }
+
+          if (error.response?.status === 401) {
+            handleLogout()
+            showNotification('Your session expired. Please log in again.')
+            return
+          }
+
+          if (error.response?.status === 429) {
+            showNotification(
+              error.response.data.error ||
+              'Too many AI messages. Please try again later.'
+            )
+            return
+          }
+
+          if (error.response?.status === 502) {
+            showNotification(
+              error.response.data.error ||
+              'Gemini could not reply. Please try again.'
+            )
+            return
+          }
+
+          showNotification(
+            error.response?.data?.error ||
+            'Failed to send message to Gemini'
+          )
+        })
+        .finally(() => {
+          setAiRespondingConversationId(currentConversationId =>
+            currentConversationId === conversationId
+              ? null
+              : currentConversationId
+          )
+        })
+
+      return
+    }
     
     setSending(true)
     
     conversationService
       .createMessage(selectedConversationId, messageObject)
       .then(returnedMessage => {
-        setMessages(currentMessages => {
-          const alreadyExists = currentMessages.some(
-            message => message.id === returnedMessage.id
-          )
-
-          return alreadyExists
-            ? currentMessages
-            : currentMessages.concat(returnedMessage)
-        })
+        setMessages(currentMessages =>
+          appendUniqueMessages(currentMessages, [returnedMessage])
+        )
         setContent('')
       })
       .catch(error => {
@@ -452,16 +557,25 @@ const App = () => {
     conversation => conversation.id === selectedConversationId
   )
 
-  const selectedParticipant = selectedConversation?.participants.find(
-    participant => participant.id !== user?.id
-  )
+  const isAiConversation = selectedConversation?.type === 'ai'
 
-  const selectedConversationName = selectedConversation?.type === 'group'
-    ? selectedConversation.name
-    : selectedParticipant?.name || selectedParticipant?.username
+  const selectedParticipant = isAiConversation
+    ? null
+    : selectedConversation?.participants.find(
+        participant => participant.id !== user?.id
+      )
+
+  const selectedConversationName = isAiConversation
+    ? selectedConversation.name || 'Gemini'
+    : selectedConversation?.type === 'group'
+      ? selectedConversation.name
+      : selectedParticipant?.name || selectedParticipant?.username
+
+  const isAiResponding = isAiConversation &&
+    aiRespondingConversationId === selectedConversationId
 
   const handleSummarize = async () => {
-    if (!selectedConversationId || summarizing) {
+    if (!selectedConversationId || summarizing || isAiConversation) {
       return
     }
 
@@ -667,35 +781,16 @@ const App = () => {
 
                     <span
                       aria-hidden="true"
-                      className="flex size-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700"
+                      className={`flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+                        isAiConversation
+                          ? 'bg-violet-100 text-violet-700'
+                          : 'bg-blue-100 text-blue-700'
+                      }`}
                     >
-                      {selectedConversationName?.charAt(0).toUpperCase()}
-                    </span>
-                    <div className="min-w-0">
-                      <h2 className="truncate text-sm font-semibold text-slate-900">
-                        {selectedConversationName}
-                      </h2>
-                      <p className="truncate text-xs text-slate-500">
-                        {selectedConversation?.type === 'group'
-                          ? 'Group conversation'
-                          : `@${selectedParticipant?.username}`}
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={handleSummarize}
-                      disabled={summarizing || loading || messages.length === 0}
-                      className="ml-auto flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
-                      aria-label={summarizing ? 'Creating conversation recap' : 'Catch me up on this conversation'}
-                      title="Summarize the latest messages"
-                    >
-                      {summarizing ? (
-                        <span className="size-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
-                      ) : (
+                      {isAiConversation ? (
                         <svg
                           aria-hidden="true"
-                          className="size-4 text-blue-600"
+                          className="size-5"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -707,14 +802,58 @@ const App = () => {
                             d="m12 3 .8 2.2A5.8 5.8 0 0 0 16.3 8.7l2.2.8-2.2.8a5.8 5.8 0 0 0-3.5 3.5L12 16l-.8-2.2a5.8 5.8 0 0 0-3.5-3.5l-2.2-.8 2.2-.8a5.8 5.8 0 0 0 3.5-3.5L12 3Z"
                           />
                         </svg>
+                      ) : (
+                        selectedConversationName?.charAt(0).toUpperCase()
                       )}
-                      <span className="hidden sm:inline">
-                        {summarizing ? 'Summarizing…' : 'Catch me up'}
-                      </span>
-                      <span className="sm:hidden">
-                        {summarizing ? 'Working…' : 'Recap'}
-                      </span>
-                    </button>
+                    </span>
+                    <div className="min-w-0">
+                      <h2 className="truncate text-sm font-semibold text-slate-900">
+                        {selectedConversationName}
+                      </h2>
+                      <p className="truncate text-xs text-slate-500">
+                        {isAiConversation
+                          ? 'AI assistant'
+                          : selectedConversation?.type === 'group'
+                            ? 'Group conversation'
+                            : `@${selectedParticipant?.username}`}
+                      </p>
+                    </div>
+
+                    {!isAiConversation && (
+                      <button
+                        type="button"
+                        onClick={handleSummarize}
+                        disabled={summarizing || loading || messages.length === 0}
+                        className="ml-auto flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
+                        aria-label={summarizing ? 'Creating conversation recap' : 'Catch me up on this conversation'}
+                        title="Summarize the latest messages"
+                      >
+                        {summarizing ? (
+                          <span className="size-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                        ) : (
+                          <svg
+                            aria-hidden="true"
+                            className="size-4 text-blue-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="m12 3 .8 2.2A5.8 5.8 0 0 0 16.3 8.7l2.2.8-2.2.8a5.8 5.8 0 0 0-3.5 3.5L12 16l-.8-2.2a5.8 5.8 0 0 0-3.5-3.5l-2.2-.8 2.2-.8a5.8 5.8 0 0 0 3.5-3.5L12 3Z"
+                            />
+                          </svg>
+                        )}
+                        <span className="hidden sm:inline">
+                          {summarizing ? 'Summarizing…' : 'Catch me up'}
+                        </span>
+                        <span className="sm:hidden">
+                          {summarizing ? 'Working…' : 'Recap'}
+                        </span>
+                      </button>
+                    )}
                   </>
                 ) : (
                   <div>
@@ -762,10 +901,14 @@ const App = () => {
                 ) : messages.length === 0 ? (
                   <div className="flex h-full min-h-48 flex-col items-center justify-center px-6 text-center">
                     <h3 className="text-sm font-medium text-slate-700">
-                      No messages yet
+                      {isAiConversation
+                        ? 'Start a conversation with Gemini'
+                        : 'No messages yet'}
                     </h3>
                     <p className="mt-1 text-sm text-slate-500">
-                      Say hello to start this conversation.
+                      {isAiConversation
+                        ? 'Ask a question or explore an idea.'
+                        : 'Say hello to start this conversation.'}
                     </p>
                   </div>
                 ) : (
@@ -776,6 +919,15 @@ const App = () => {
                     startEditing={startEditing}
                   />
                 )}
+                {isAiResponding && (
+                  <div
+                    role="status"
+                    className="mt-5 flex items-center gap-2 pl-1 text-xs text-slate-500"
+                  >
+                    <span className="size-3.5 animate-spin rounded-full border-2 border-violet-200 border-t-violet-600" />
+                    Gemini is thinking…
+                  </div>
+                )}
                 <div ref={messageEndRef} />
               </div>
 
@@ -784,10 +936,11 @@ const App = () => {
                   addMessage={addMessage}
                   content={content}
                   handleContentChange={handleContentChange}
-                  sending={sending}
+                  sending={sending || isAiResponding}
                   saving={saving}
                   isEditing={isEditing}
                   cancelEditing={cancelEditing}
+                  isAiConversation={isAiConversation}
                 />
               )}
             </section>

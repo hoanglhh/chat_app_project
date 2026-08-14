@@ -1,4 +1,13 @@
-const MessageForm = ({ content, addMessage, handleContentChange, sending, saving, isEditing, cancelEditing }) => {
+const MessageForm = ({
+  content,
+  addMessage,
+  handleContentChange,
+  sending,
+  saving,
+  isEditing,
+  cancelEditing,
+  isAiConversation
+}) => {
   const cannotSend = sending || saving || content.trim() === ''
 
   const handleKeyDown = (event) => {
@@ -40,7 +49,11 @@ const MessageForm = ({ content, addMessage, handleContentChange, sending, saving
           value={content}
           onChange={handleContentChange}
           onKeyDown={handleKeyDown}
-          placeholder={isEditing ? 'Update your message…' : 'Write a message…'}
+          placeholder={isEditing
+            ? 'Update your message…'
+            : isAiConversation
+              ? 'Message Gemini…'
+              : 'Write a message…'}
           rows="1"
         />
         <button
@@ -52,7 +65,9 @@ const MessageForm = ({ content, addMessage, handleContentChange, sending, saving
             {saving
               ? 'Saving…'
               : sending
-                ? 'Sending…'
+                ? isAiConversation
+                  ? 'Thinking…'
+                  : 'Sending…'
                 : isEditing
                   ? 'Save'
                   : 'Send'}
@@ -78,7 +93,9 @@ const MessageForm = ({ content, addMessage, handleContentChange, sending, saving
         </button>
       </div>
       <p className="mt-2 hidden text-xs text-slate-400 sm:block">
-        Enter to send · Shift + Enter for a new line
+        {isAiConversation
+          ? 'Gemini can make mistakes. Check important information.'
+          : 'Enter to send · Shift + Enter for a new line'}
       </p>
     </form>
   )

@@ -3,8 +3,9 @@ const Conversation = require('../models/conversation')
 const User = require('../models/user')
 const jwt = require('jsonwebtoken')
 const config = require('../utils/config')
+const logger = require('../utils/logger')
 const Message = require('../models/message')
-const { summarizeMessages } = require('../services/gemini')
+const { summarizeMessages, generateAiReply } = require('../services/gemini')
 const { rateLimit } = require('express-rate-limit')
 
 const getTokenFrom = req => {
@@ -17,7 +18,7 @@ const getTokenFrom = req => {
   return null
 }
 
-const authenticateSummaryRequest = (req, res, next) => {
+const authenticateGeminiRequest = (req, res, next) => {
   try {
     const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
 
@@ -42,6 +43,17 @@ const summaryLimiter = rateLimit({
   keyGenerator: req => req.decodedToken.id,
   message: {
     error: 'Too many summary requests. Please try again in 10 minutes.'
+  }
+})
+
+const aiMessageLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: req => req.decodedToken.id,
+  message: {
+    error: 'Too many AI messages. Please try again in 10 minutes.'
   }
 })
 
@@ -114,6 +126,50 @@ conversationsRouter.post('/', async (req, res) => {
   return res.status(201).json(savedConversation)
 }) 
 
+conversationsRouter.post('/ai', async (req, res) => {
+  const decodedToken = jwt.verify(
+    getTokenFrom(req),
+    config.SECRET
+  )
+
+  if (!decodedToken.id) {
+    return res.status(401).json({
+      error: 'token invalid'
+    })
+  }
+
+  const user = await User.findById(decodedToken.id)
+
+  if (!user) {
+    return res.status(401).json({
+      error: 'user missing or invalid'
+    })
+  }
+
+  const existingConversation = await Conversation
+    .findOne({
+      type: 'ai',
+      createdBy: user._id
+    })
+    .populate('participants', 'username name')
+
+  if (existingConversation) {
+    return res.status(200).json(existingConversation)
+  }
+
+  const conversation = new Conversation({
+    type: 'ai',
+    name: 'Gemini',
+    participants: [user._id],
+    createdBy: user._id
+  })
+
+  const savedConversation = await conversation.save()
+  await savedConversation.populate('participants', 'username name')
+
+  return res.status(201).json(savedConversation)
+})
+
 conversationsRouter.get('/:conversationId/messages', async (req, res) => {
     const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
     if (!decodedToken.id) {
@@ -150,7 +206,7 @@ conversationsRouter.get('/:conversationId/messages', async (req, res) => {
 
 conversationsRouter.post(
   '/:conversationId/summary',
-  authenticateSummaryRequest,
+  authenticateGeminiRequest,
   summaryLimiter,
   async (req, res) => {
     const decodedToken = req.decodedToken
@@ -186,6 +242,106 @@ conversationsRouter.post(
   }
 )
 
+conversationsRouter.post(
+  '/:conversationId/ai-messages',
+  authenticateGeminiRequest,
+  aiMessageLimiter,
+  async (req, res) => {
+    const decodedToken = req.decodedToken
+
+    const user = await User.findById(decodedToken.id)
+
+    if (!user) {
+      return res.status(401).json({
+        error: 'user missing or invalid'
+      })
+    }
+
+    const conversation = await Conversation.findById(
+      req.params.conversationId
+    )
+
+    if (!conversation) {
+      return res.status(404).json({
+        error: 'conversation not found'
+      })
+    }
+
+    if (
+      conversation.type !== 'ai' ||
+      conversation.createdBy.toString() !== decodedToken.id
+    ) {
+      return res.status(403).json({
+        error: 'not allowed to use this AI conversation'
+      })
+    }
+
+    const content = req.body.content?.trim()
+
+    if (!content) {
+      return res.status(400).json({
+        error: 'content missing'
+      })
+    }
+
+    const userMessage = await new Message({
+      name: user.name || user.username,
+      content,
+      role: 'user',
+      user: user._id,
+      conversation: conversation._id
+    }).save()
+
+    user.messages = user.messages.concat(userMessage._id)
+    await user.save()
+
+    const io = req.app.get('io')
+
+    io.to(conversation.id).emit(
+      'message:created',
+      userMessage.toJSON()
+    )
+
+    const history = await Message
+      .find({ conversation: conversation._id })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .lean()
+
+    history.reverse()
+
+    let reply
+
+    try {
+      reply = await generateAiReply(history)
+    } catch (error) {
+      logger.error('Gemini failed to generate a reply:', error.message)
+
+      return res.status(502).json({
+        error: 'Gemini could not reply. Your message was still saved.',
+        userMessage: userMessage.toJSON()
+      })
+    }
+
+    const assistantMessage = await new Message({
+      name: 'Gemini',
+      content: reply,
+      role: 'assistant',
+      conversation: conversation._id
+    }).save()
+
+    io.to(conversation.id).emit(
+      'message:created',
+      assistantMessage.toJSON()
+    )
+
+    return res.status(201).json({
+      userMessage,
+      assistantMessage
+    })
+  }
+)
+
 conversationsRouter.post('/:conversationId/messages', async (req, res) => {
   const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
   if (!decodedToken.id) {
@@ -205,6 +361,12 @@ conversationsRouter.post('/:conversationId/messages', async (req, res) => {
   if (!conversation) {
     return res.status(404).json({
       error: 'conversation not found'
+    })
+  }
+
+  if (conversation.type === 'ai') {
+    return res.status(400).json({
+      error: 'use the AI message endpoint for this conversation'
     })
   }
 
@@ -280,7 +442,10 @@ conversationsRouter.put('/:conversationId/messages/:messageId', async (req, res)
     })
   }
 
-  if (message.user.toString() !== decodedToken.id) {
+  if (
+    message.role === 'assistant' ||
+    message.user?.toString() !== decodedToken.id
+  ) {
     return res.status(403).json({
       error: 'not allowed to edit this message'
     })
@@ -342,7 +507,10 @@ conversationsRouter.delete('/:conversationId/messages/:messageId', async (req, r
     })
   }
 
-  if (message.user.toString() !== decodedToken.id) {
+  if (
+    message.role === 'assistant' ||
+    message.user?.toString() !== decodedToken.id
+  ) {
     return res.status(403).json({
       error: 'not allowed to delete this message'
     })

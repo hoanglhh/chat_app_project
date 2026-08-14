@@ -43,6 +43,22 @@ const createMessage = (conversationId, newMessage) => {
     .then(response => response.data)
 }
 
+const getOrCreateAiConversation = () => {
+  return axios
+    .post(`${baseUrl}/ai`, {}, getConfig())
+    .then(response => response.data)
+}
+
+const createAiMessage = (conversationId, newMessage) => {
+  return axios
+    .post(
+      `${baseUrl}/${conversationId}/ai-messages`,
+      newMessage,
+      getConfig()
+    )
+    .then(response => response.data)
+}
+
 const updateMessage = (
   conversationId,
   messageId,
@@ -80,6 +96,8 @@ export default {
   create,
   getMessages,
   createMessage,
+  getOrCreateAiConversation,
+  createAiMessage,
   updateMessage,
   removeMessage,
   summarize
