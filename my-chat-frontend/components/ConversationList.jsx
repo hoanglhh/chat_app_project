@@ -4,42 +4,71 @@ const ConversationList = ({
   selectedConversationId,
   onSelect
 }) => {
-  return (
-    <div>
-      <h2 className="mb-2 text-sm font-semibold text-slate-700">
-        Conversations
-      </h2>
-
-      <div className="flex gap-2 overflow-x-auto">
-        {conversations.map(conversation => {
-          const otherParticipant = conversation.participants.find(
-            participant => participant.id !== currentUserId
-          )
-
-          if (!otherParticipant) {
-            return null
-          }
-
-          const isSelected =
-            conversation.id === selectedConversationId
-
-          return (
-            <button
-              key={conversation.id}
-              type="button"
-              onClick={() => onSelect(conversation.id)}
-              className={
-                isSelected
-                  ? 'shrink-0 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white'
-                  : 'shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200'
-              }
-            >
-              {otherParticipant.name}
-            </button>
-          )
-        })}
+  if (conversations.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-300 px-4 py-5 text-center">
+        <p className="text-sm font-medium text-slate-700">No conversations yet</p>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          Use the new conversation button to find someone.
+        </p>
       </div>
-    </div>
+    )
+  }
+
+  return (
+    <nav className="space-y-1" aria-label="Conversations">
+      {conversations.map(conversation => {
+        const otherParticipant = conversation.participants.find(
+          participant => participant.id !== currentUserId
+        )
+
+        if (!otherParticipant) {
+          return null
+        }
+
+        const displayName = otherParticipant.name || otherParticipant.username
+        const initial = displayName.charAt(0).toUpperCase()
+        const isSelected = conversation.id === selectedConversationId
+
+        return (
+          <button
+            key={conversation.id}
+            type="button"
+            onClick={() => onSelect(conversation.id)}
+            aria-pressed={isSelected}
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+              isSelected
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-700 hover:bg-slate-100'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+                isSelected
+                  ? 'bg-white/20 text-white'
+                  : 'bg-blue-100 text-blue-700'
+              }`}
+            >
+              {initial}
+            </span>
+
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">
+                {displayName}
+              </span>
+              <span
+                className={`block truncate text-xs ${
+                  isSelected ? 'text-blue-100' : 'text-slate-500'
+                }`}
+              >
+                @{otherParticipant.username}
+              </span>
+            </span>
+          </button>
+        )
+      })}
+    </nav>
   )
 }
 

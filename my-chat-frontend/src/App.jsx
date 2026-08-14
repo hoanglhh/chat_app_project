@@ -9,6 +9,7 @@ import RegisterForm from '../components/RegisterForm'
 import socket from '../services/socket'
 import conversationService from '../services/conversations'
 import ConversationList from "../components/ConversationList"
+import NewConversationModal from '../components/NewConversationModal'
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
@@ -30,6 +31,7 @@ const App = () => {
   const [users, setUsers] = useState([])
   const [conversations, setConversations] = useState([])
   const [selectedConversationId, setSelectedConversationId] = useState(null)
+  const [isNewConversationOpen, setIsNewConversationOpen] = useState(false)
   const [registerUsername, setRegisterUsername] = useState('')
   const [registerName, setRegisterName] = useState('')
   const [registerPassword, setRegisterPassword] = useState('')
@@ -58,6 +60,14 @@ const App = () => {
     setSelectedConversationId(conversationId)
   }
 
+  const showConversationList = () => {
+    setMessages([])
+    setLoading(false)
+    setEditingMessageId(null)
+    setContent('')
+    setSelectedConversationId(null)
+  }
+
   const handleLogout = () => {
     window.localStorage.removeItem('loggedChatUser')
     setContent('')
@@ -66,6 +76,7 @@ const App = () => {
     setConversations([])
     setUsers([])
     setSelectedConversationId(null)
+    setIsNewConversationOpen(false)
     setUser(null)
   }
 
@@ -418,16 +429,30 @@ const App = () => {
       })
 
       selectConversation(conversation.id)
+      return true
     } catch (error) {
       showNotification(
         error.response?.data?.error || 'Failed to start conversation'
       )
+      return false
     }
   }
 
+  const selectedConversation = conversations.find(
+    conversation => conversation.id === selectedConversationId
+  )
+
+  const selectedParticipant = selectedConversation?.participants.find(
+    participant => participant.id !== user?.id
+  )
+
+  const selectedConversationName = selectedConversation?.type === 'group'
+    ? selectedConversation.name
+    : selectedParticipant?.name || selectedParticipant?.username
+
   return (
     <main className="h-dvh overflow-hidden bg-stone-100">
-      <div className="mx-auto h-full w-full max-w-3xl sm:p-4">
+      <div className="mx-auto h-full w-full max-w-5xl sm:p-4">
         <section className="flex h-full min-h-0 flex-col overflow-hidden bg-white sm:rounded-2xl sm:border sm:border-slate-200 sm:shadow-sm">
           <header className="flex shrink-0 items-center justify-between border-b border-slate-200 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
@@ -523,71 +548,178 @@ const App = () => {
             </div>
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="shrink-0 space-y-4 border-b border-slate-200 px-4 py-3">
-              <ConversationList
-                conversations={conversations}
-                currentUserId={user.id}
-                selectedConversationId={selectedConversationId}
-                onSelect={selectConversation}
-              />
-
-              <h2 className="mb-2 text-sm font-semibold text-slate-700">
-                Start a conversation
-              </h2>
-
-              <div className="flex gap-2 overflow-x-auto">
-                {users.map(otherUser => (
-                  <button
-                    key={otherUser.id}
-                    type="button"
-                    onClick={() => startConversation(otherUser.id)}
-                    className="shrink-0 rounded-lg bg-slate-100 px-3 py-2 text-sm hover:bg-slate-200"
-                  >
-                    {otherUser.name} (@{otherUser.username})
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-white px-4 py-5 sm:px-6">
-              {!selectedConversationId ? (
-                <div className="flex h-full items-center justify-center text-sm text-slate-500">
-                  Select a conversation to start chatting.
-                </div>
-              ) : loading ? (
-                <div className="flex h-full min-h-48 items-center justify-center gap-2 text-sm text-slate-500">
-                  <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
-                  Loading messages…
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="flex h-full min-h-48 flex-col items-center justify-center px-6 text-center">
-                  <h2 className="text-sm font-medium text-slate-700">
-                    No messages yet
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <aside
+              className={`${
+                selectedConversationId ? 'hidden md:flex' : 'flex'
+              } w-full shrink-0 flex-col bg-white md:w-72 md:border-r md:border-slate-200`}
+            >
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 py-4">
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold text-slate-900">
+                    Conversations
                   </h2>
-                  <p className="mt-1 text-sm text-slate-500">
-                    Start the conversation below.
+                  <p className="mt-0.5 truncate text-xs text-slate-500">
+                    Your recent messages
                   </p>
                 </div>
-              ) : (
-                <MessageList
-                  messages={messages}
-                  handleDelete={handleDelete}
+
+                <button
+                  type="button"
+                  onClick={() => setIsNewConversationOpen(true)}
+                  className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                  aria-label="Start a new conversation"
+                  title="New conversation"
+                >
+                  <svg
+                    aria-hidden="true"
+                    className="size-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path strokeLinecap="round" d="M12 5v14M5 12h14" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
+                <ConversationList
+                  conversations={conversations}
                   currentUserId={user.id}
-                  startEditing={startEditing}
+                  selectedConversationId={selectedConversationId}
+                  onSelect={selectConversation}
+                />
+              </div>
+            </aside>
+
+            <section
+              className={`${
+                selectedConversationId ? 'flex' : 'hidden md:flex'
+              } min-w-0 flex-1 flex-col bg-white`}
+            >
+              <div className="flex h-16 shrink-0 items-center gap-3 border-b border-slate-200 px-4 sm:px-5">
+                {selectedConversationId ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={showConversationList}
+                      className="flex size-9 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 md:hidden"
+                      aria-label="Back to conversations"
+                    >
+                      <svg
+                        aria-hidden="true"
+                        className="size-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m15 18-6-6 6-6" />
+                      </svg>
+                    </button>
+
+                    <span
+                      aria-hidden="true"
+                      className="flex size-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700"
+                    >
+                      {selectedConversationName?.charAt(0).toUpperCase()}
+                    </span>
+                    <div className="min-w-0">
+                      <h2 className="truncate text-sm font-semibold text-slate-900">
+                        {selectedConversationName}
+                      </h2>
+                      <p className="truncate text-xs text-slate-500">
+                        {selectedConversation?.type === 'group'
+                          ? 'Group conversation'
+                          : `@${selectedParticipant?.username}`}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <h2 className="text-sm font-semibold text-slate-900">
+                      Your messages
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Select a conversation from the sidebar
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/50 px-4 py-5 sm:px-6">
+                {!selectedConversationId ? (
+                  <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                    <span className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
+                      <svg
+                        aria-hidden="true"
+                        className="size-7"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M8.625 9.75h6.75m-6.75 3h4.5M21 12c0 4.142-4.03 7.5-9 7.5a10.7 10.7 0 0 1-3.17-.47L3 21l1.58-4.21A7 7 0 0 1 3 12c0-4.142 4.03-7.5 9-7.5s9 3.358 9 7.5Z"
+                        />
+                      </svg>
+                    </span>
+                    <h3 className="text-sm font-semibold text-slate-800">
+                      Select a conversation
+                    </h3>
+                    <p className="mt-1 max-w-xs text-sm leading-6 text-slate-500">
+                      Choose someone from the sidebar to view your messages.
+                    </p>
+                  </div>
+                ) : loading ? (
+                  <div className="flex h-full min-h-48 items-center justify-center gap-2 text-sm text-slate-500">
+                    <span className="size-4 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                    Loading messages…
+                  </div>
+                ) : messages.length === 0 ? (
+                  <div className="flex h-full min-h-48 flex-col items-center justify-center px-6 text-center">
+                    <h3 className="text-sm font-medium text-slate-700">
+                      No messages yet
+                    </h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Say hello to start this conversation.
+                    </p>
+                  </div>
+                ) : (
+                  <MessageList
+                    messages={messages}
+                    handleDelete={handleDelete}
+                    currentUserId={user.id}
+                    startEditing={startEditing}
+                  />
+                )}
+                <div ref={messageEndRef} />
+              </div>
+
+              {selectedConversationId && (
+                <MessageForm
+                  addMessage={addMessage}
+                  content={content}
+                  handleContentChange={handleContentChange}
+                  sending={sending}
+                  saving={saving}
+                  isEditing={isEditing}
+                  cancelEditing={cancelEditing}
                 />
               )}
-              <div ref={messageEndRef} />
-            </div>
+            </section>
 
-            <MessageForm
-              addMessage={addMessage}
-              content={content}
-              handleContentChange={handleContentChange}
-              sending={sending}
-              saving={saving}
-              isEditing={isEditing}
-              cancelEditing={cancelEditing}
-            />
+            {isNewConversationOpen && (
+              <NewConversationModal
+                users={users}
+                onSelect={startConversation}
+                onClose={() => setIsNewConversationOpen(false)}
+              />
+            )}
           </div>
         )}
 
