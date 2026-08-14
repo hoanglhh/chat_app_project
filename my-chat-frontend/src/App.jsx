@@ -11,6 +11,7 @@ import conversationService from '../services/conversations'
 import ConversationList from "../components/ConversationList"
 import NewConversationModal from '../components/NewConversationModal'
 import SummaryModal from '../components/SummaryModal'
+import InviteMembersModal from '../components/InviteMembersModal'
 
 const appendUniqueMessages = (currentMessages, incomingMessages) => {
   const messageIds = new Set(
@@ -50,6 +51,7 @@ const App = () => {
   const [conversations, setConversations] = useState([])
   const [selectedConversationId, setSelectedConversationId] = useState(null)
   const [isNewConversationOpen, setIsNewConversationOpen] = useState(false)
+  const [isInviteMembersOpen, setIsInviteMembersOpen] = useState(false)
   const [registerUsername, setRegisterUsername] = useState('')
   const [registerName, setRegisterName] = useState('')
   const [registerPassword, setRegisterPassword] = useState('')
@@ -84,6 +86,7 @@ const App = () => {
     setSelectedConversationId(conversationId)
     setSummary(null)
     setIsSummaryOpen(false)
+    setIsInviteMembersOpen(false)
   }
 
   const showConversationList = () => {
@@ -93,6 +96,7 @@ const App = () => {
     setContent('')
     setSummary(null)
     setIsSummaryOpen(false)
+    setIsInviteMembersOpen(false)
     selectedConversationIdRef.current = null
     setSelectedConversationId(null)
   }
@@ -108,6 +112,7 @@ const App = () => {
     setSelectedConversationId(null)
     setAiRespondingConversationId(null)
     setIsNewConversationOpen(false)
+    setIsInviteMembersOpen(false)
     setUser(null)
     setSummary(null)
     setIsSummaryOpen(false)
@@ -202,10 +207,44 @@ const App = () => {
 
     socket.on('message:deleted', handleMessageDeleted)
 
+    const handleConversationCreated = newConversation => {
+      setConversations(currentConversations => {
+        const alreadyExists = currentConversations.some(
+          conversation => conversation.id === newConversation.id
+        )
+
+        return alreadyExists
+          ? currentConversations
+          : currentConversations.concat(newConversation)
+      })
+    }
+
+    socket.on('conversation:created', handleConversationCreated)
+
+    const handleConversationUpdated = updatedConversation => {
+      setConversations(currentConversations => {
+        const alreadyExists = currentConversations.some(
+          conversation => conversation.id === updatedConversation.id
+        )
+
+        return alreadyExists
+          ? currentConversations.map(conversation =>
+              conversation.id === updatedConversation.id
+                ? updatedConversation
+                : conversation
+            )
+          : currentConversations.concat(updatedConversation)
+      })
+    }
+
+    socket.on('conversation:updated', handleConversationUpdated)
+
     return () => {
       socket.off('message:created', handleMessageCreated)
       socket.off('message:updated', handleMessageUpdated)
       socket.off('message:deleted', handleMessageDeleted)
+      socket.off('conversation:created', handleConversationCreated)
+      socket.off('conversation:updated', handleConversationUpdated)
     }
   }, [])
 
@@ -553,13 +592,72 @@ const App = () => {
     }
   }
 
+  const startGroupConversation = async (name, participantIds) => {
+    try {
+      const conversation = await conversationService.createGroup(
+        name,
+        participantIds
+      )
+
+      setConversations(currentConversations =>
+        currentConversations.concat(conversation)
+      )
+
+      selectConversation(conversation.id)
+      return true
+    } catch (error) {
+      if (error.response?.status === 401) {
+        handleLogout()
+        showNotification('Your session expired. Please log in again.')
+        return false
+      }
+
+      showNotification(
+        error.response?.data?.error || 'Failed to create group'
+      )
+      return false
+    }
+  }
+
+  const inviteGroupMembers = async participantIds => {
+    try {
+      const updatedConversation =
+        await conversationService.addParticipants(
+          selectedConversationId,
+          participantIds
+        )
+
+      setConversations(currentConversations =>
+        currentConversations.map(conversation =>
+          conversation.id === updatedConversation.id
+            ? updatedConversation
+            : conversation
+        )
+      )
+      showNotification('People added to the group.', 'success')
+      return true
+    } catch (error) {
+      if (error.response?.status === 401) {
+        handleLogout()
+        showNotification('Your session expired. Please log in again.')
+        return false
+      }
+
+      showNotification(
+        error.response?.data?.error || 'Failed to add people'
+      )
+      return false
+    }
+  }
+
   const selectedConversation = conversations.find(
     conversation => conversation.id === selectedConversationId
   )
 
   const isAiConversation = selectedConversation?.type === 'ai'
+  const isGroupConversation = selectedConversation?.type === 'group'
 
-  const selectedParticipant = isAiConversation
+  const selectedParticipant = isAiConversation || isGroupConversation
     ? null
     : selectedConversation?.participants.find(
         participant => participant.id !== user?.id
@@ -567,9 +665,17 @@ const App = () => {
 
   const selectedConversationName = isAiConversation
     ? selectedConversation.name || 'Gemini'
-    : selectedConversation?.type === 'group'
+    : isGroupConversation
       ? selectedConversation.name
       : selectedParticipant?.name || selectedParticipant?.username
+
+  const availableGroupInvitees = isGroupConversation
+    ? users.filter(otherUser =>
+        !selectedConversation.participants.some(
+          participant => participant.id === otherUser.id
+        )
+      )
+    : []
 
   const isAiResponding = isAiConversation &&
     aiRespondingConversationId === selectedConversationId
@@ -813,46 +919,73 @@ const App = () => {
                       <p className="truncate text-xs text-slate-500">
                         {isAiConversation
                           ? 'AI assistant'
-                          : selectedConversation?.type === 'group'
-                            ? 'Group conversation'
+                          : isGroupConversation
+                            ? `${selectedConversation.participants.length} members`
                             : `@${selectedParticipant?.username}`}
                       </p>
                     </div>
 
                     {!isAiConversation && (
-                      <button
-                        type="button"
-                        onClick={handleSummarize}
-                        disabled={summarizing || loading || messages.length === 0}
-                        className="ml-auto flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
-                        aria-label={summarizing ? 'Creating conversation recap' : 'Catch me up on this conversation'}
-                        title="Summarize the latest messages"
-                      >
-                        {summarizing ? (
-                          <span className="size-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
-                        ) : (
-                          <svg
-                            aria-hidden="true"
-                            className="size-4 text-blue-600"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
+                      <div className="ml-auto flex shrink-0 items-center gap-2">
+                        {isGroupConversation && (
+                          <button
+                            type="button"
+                            onClick={() => setIsInviteMembersOpen(true)}
+                            className="flex size-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                            aria-label="Add people to this group"
+                            title="Add people"
                           >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="m12 3 .8 2.2A5.8 5.8 0 0 0 16.3 8.7l2.2.8-2.2.8a5.8 5.8 0 0 0-3.5 3.5L12 16l-.8-2.2a5.8 5.8 0 0 0-3.5-3.5l-2.2-.8 2.2-.8a5.8 5.8 0 0 0 3.5-3.5L12 3Z"
-                            />
-                          </svg>
+                            <svg
+                              aria-hidden="true"
+                              className="size-4.5"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M15 19.1a7.8 7.8 0 0 0-6 0M12 14.25a3.75 3.75 0 1 0 0-7.5 3.75 3.75 0 0 0 0 7.5ZM19 8v6m3-3h-6"
+                              />
+                            </svg>
+                          </button>
                         )}
-                        <span className="hidden sm:inline">
-                          {summarizing ? 'Summarizing…' : 'Catch me up'}
-                        </span>
-                        <span className="sm:hidden">
-                          {summarizing ? 'Working…' : 'Recap'}
-                        </span>
-                      </button>
+
+                        <button
+                          type="button"
+                          onClick={handleSummarize}
+                          disabled={summarizing || loading || messages.length === 0}
+                          className="flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
+                          aria-label={summarizing ? 'Creating conversation recap' : 'Catch me up on this conversation'}
+                          title="Summarize the latest messages"
+                        >
+                          {summarizing ? (
+                            <span className="size-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                          ) : (
+                            <svg
+                              aria-hidden="true"
+                              className="size-4 text-blue-600"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="m12 3 .8 2.2A5.8 5.8 0 0 0 16.3 8.7l2.2.8-2.2.8a5.8 5.8 0 0 0-3.5 3.5L12 16l-.8-2.2a5.8 5.8 0 0 0-3.5-3.5l-2.2-.8 2.2-.8a5.8 5.8 0 0 0 3.5-3.5L12 3Z"
+                              />
+                            </svg>
+                          )}
+                          <span className="hidden sm:inline">
+                            {summarizing ? 'Summarizing…' : 'Catch me up'}
+                          </span>
+                          <span className="sm:hidden">
+                            {summarizing ? 'Working…' : 'Recap'}
+                          </span>
+                        </button>
+                      </div>
                     )}
                   </>
                 ) : (
@@ -949,7 +1082,16 @@ const App = () => {
               <NewConversationModal
                 users={users}
                 onSelect={startConversation}
+                onCreateGroup={startGroupConversation}
                 onClose={() => setIsNewConversationOpen(false)}
+              />
+            )}
+
+            {isInviteMembersOpen && isGroupConversation && (
+              <InviteMembersModal
+                users={availableGroupInvitees}
+                onInvite={inviteGroupMembers}
+                onClose={() => setIsInviteMembersOpen(false)}
               />
             )}
 

@@ -37,6 +37,7 @@ io.use((socket, next) => {
 
 io.on('connection', socket => {
   logger.info(`Socket connected: ${socket.id}`)
+  socket.join(`user:${socket.userId}`)
 
   socket.on('disconnect', () => {
     logger.info(`Socket disconnected: ${socket.id}`)
@@ -83,4 +84,3 @@ io.on('connection', socket => {
 server.listen(config.PORT, () => {
   logger.info(`Server running on port ${config.PORT}`)
 })
-

@@ -19,17 +19,20 @@ const ConversationList = ({
     <nav className="space-y-1" aria-label="Conversations">
       {conversations.map(conversation => {
         const isAiConversation = conversation.type === 'ai'
+        const isGroupConversation = conversation.type === 'group'
         const otherParticipant = conversation.participants.find(
           participant => participant.id !== currentUserId
         )
 
-        if (!isAiConversation && !otherParticipant) {
+        if (!isAiConversation && !isGroupConversation && !otherParticipant) {
           return null
         }
 
         const displayName = isAiConversation
           ? conversation.name || 'Gemini'
-          : otherParticipant.name || otherParticipant.username
+          : isGroupConversation
+            ? conversation.name || 'Group conversation'
+            : otherParticipant.name || otherParticipant.username
         const initial = displayName.charAt(0).toUpperCase()
         const isSelected = conversation.id === selectedConversationId
 
@@ -52,7 +55,9 @@ const ConversationList = ({
                   ? 'bg-white/20 text-white'
                   : isAiConversation
                     ? 'bg-violet-100 text-violet-700'
-                    : 'bg-blue-100 text-blue-700'
+                    : isGroupConversation
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-blue-100 text-blue-700'
               }`}
             >
               {isAiConversation ? (
@@ -84,7 +89,9 @@ const ConversationList = ({
               >
                 {isAiConversation
                   ? 'AI assistant'
-                  : `@${otherParticipant.username}`}
+                  : isGroupConversation
+                    ? `${conversation.participants.length} members`
+                    : `@${otherParticipant.username}`}
               </span>
             </span>
           </button>

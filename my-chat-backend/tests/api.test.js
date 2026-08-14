@@ -30,6 +30,7 @@ app.set('io', {
 
 let alice
 let bob
+let charlie
 let conversation
 
 const loginAs = async (username, password = 'secret123') => {
@@ -73,6 +74,12 @@ beforeEach(async () => {
     passwordHash
   }).save()
 
+  charlie = await new User({
+    username: 'charlie',
+    name: 'Charlie',
+    passwordHash
+  }).save()
+
   conversation = await new Conversation({
     type: 'direct',
     participants: [alice._id, bob._id],
@@ -87,16 +94,16 @@ describe('users and login', () => {
     const response = await api
       .post('/api/users')
       .send({
-        username: 'charlie',
-        name: 'Charlie',
+        username: 'dave',
+        name: 'Dave',
         password: 'secret123'
       })
       .expect(201)
       .expect('Content-Type', /application\/json/)
 
-    assert.equal(response.body.username, 'charlie')
+    assert.equal(response.body.username, 'dave')
     assert.equal(response.body.passwordHash, undefined)
-    assert.equal(await User.countDocuments({}), 3)
+    assert.equal(await User.countDocuments({}), 4)
   })
 
   test('duplicate usernames are rejected', async () => {
@@ -116,14 +123,14 @@ describe('users and login', () => {
     const response = await api
       .post('/api/users')
       .send({
-        username: 'charlie',
+        username: 'eve',
         name: '   ',
         password: 'secret123'
       })
       .expect(400)
 
     assert.equal(response.body.error, 'name, username and password are required')
-    assert.equal(await User.countDocuments({}), 2)
+    assert.equal(await User.countDocuments({}), 3)
   })
 
   test('valid credentials return a token and user id', async () => {
@@ -170,6 +177,119 @@ describe('direct conversations', () => {
 
     assert.equal(response.body.id, conversation.id)
     assert.equal(await Conversation.countDocuments({}), 1)
+  })
+
+  test('a user can create a named group conversation', async () => {
+    const aliceToken = await loginAs('alice')
+
+    const response = await api
+      .post('/api/conversations/group')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({
+        name: 'Study group',
+        participantIds: [bob.id, charlie.id]
+      })
+      .expect(201)
+
+    assert.equal(response.body.type, 'group')
+    assert.equal(response.body.name, 'Study group')
+    assert.equal(response.body.createdBy, alice.id)
+    assert.equal(response.body.participants.length, 3)
+    assert.deepEqual(
+      response.body.participants
+        .map(participant => participant.username)
+        .sort(),
+      ['alice', 'bob', 'charlie']
+    )
+    assert.equal(emittedEvents.length, 2)
+    assert.deepEqual(
+      emittedEvents.map(event => event.room).sort(),
+      [`user:${bob.id}`, `user:${charlie.id}`].sort()
+    )
+    emittedEvents.forEach(event => {
+      assert.equal(event.event, 'conversation:created')
+      assert.equal(event.payload.id, response.body.id)
+    })
+  })
+
+  test('creating a group requires a name and two other members', async () => {
+    const aliceToken = await loginAs('alice')
+
+    await api
+      .post('/api/conversations/group')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({ name: '   ', participantIds: [bob.id, charlie.id] })
+      .expect(400)
+
+    await api
+      .post('/api/conversations/group')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({ name: 'Empty group', participantIds: [] })
+      .expect(400)
+
+    await api
+      .post('/api/conversations/group')
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .send({ name: 'Too small', participantIds: [bob.id] })
+      .expect(400)
+  })
+
+  test('a group member can invite another user', async () => {
+    const passwordHash = await bcrypt.hash('secret123', 4)
+    const dave = await new User({
+      username: 'dave',
+      name: 'Dave',
+      passwordHash
+    }).save()
+    const bobToken = await loginAs('bob')
+    const group = await new Conversation({
+      type: 'group',
+      name: 'Study group',
+      participants: [alice._id, bob._id, charlie._id],
+      createdBy: alice._id
+    }).save()
+
+    emittedEvents.length = 0
+
+    const response = await api
+      .post(`/api/conversations/${group.id}/participants`)
+      .set('Authorization', `Bearer ${bobToken}`)
+      .send({ participantIds: [dave.id] })
+      .expect(200)
+
+    assert.equal(response.body.participants.length, 4)
+    assert.deepEqual(
+      response.body.participants
+        .map(participant => participant.username)
+        .sort(),
+      ['alice', 'bob', 'charlie', 'dave']
+    )
+    assert.deepEqual(
+      emittedEvents.map(event => event.room).sort(),
+      [alice, bob, charlie, dave]
+        .map(participant => `user:${participant.id}`)
+        .sort()
+    )
+    emittedEvents.forEach(event => {
+      assert.equal(event.event, 'conversation:updated')
+      assert.equal(event.payload.id, group.id)
+    })
+  })
+
+  test('a user outside a group cannot invite members', async () => {
+    const outsiderToken = await loginAs('charlie')
+    const group = await new Conversation({
+      type: 'group',
+      name: 'Private group',
+      participants: [alice._id, bob._id],
+      createdBy: alice._id
+    }).save()
+
+    await api
+      .post(`/api/conversations/${group.id}/participants`)
+      .set('Authorization', `Bearer ${outsiderToken}`)
+      .send({ participantIds: [charlie.id] })
+      .expect(403)
   })
 
   test('conversation summaries are limited per authenticated user', async () => {
@@ -237,12 +357,6 @@ describe('conversation-scoped messages', () => {
   })
 
   test('a user outside the conversation cannot read or create messages', async () => {
-    const passwordHash = await bcrypt.hash('secret123', 4)
-    await new User({
-      username: 'charlie',
-      name: 'Charlie',
-      passwordHash
-    }).save()
     const charlieToken = await loginAs('charlie')
 
     await api

@@ -27,6 +27,26 @@ const create = participantId => {
   .then(response => response.data)
 }
 
+const createGroup = (name, participantIds) => {
+  return axios
+    .post(
+      `${baseUrl}/group`,
+      { name, participantIds },
+      getConfig()
+    )
+    .then(response => response.data)
+}
+
+const addParticipants = (conversationId, participantIds) => {
+  return axios
+    .post(
+      `${baseUrl}/${conversationId}/participants`,
+      { participantIds },
+      getConfig()
+    )
+    .then(response => response.data)
+}
+
 const getMessages = conversationId => {
   return axios
     .get(`${baseUrl}/${conversationId}/messages`, getConfig())
@@ -94,6 +114,8 @@ export default {
   setToken,
   getAll,
   create,
+  createGroup,
+  addParticipants,
   getMessages,
   createMessage,
   getOrCreateAiConversation,

@@ -126,6 +126,173 @@ conversationsRouter.post('/', async (req, res) => {
   return res.status(201).json(savedConversation)
 }) 
 
+conversationsRouter.post('/group', async (req, res) => {
+  const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
+
+  if (!decodedToken.id) {
+    return res.status(401).json({
+      error: 'token invalid'
+    })
+  }
+
+  const name = req.body.name?.trim()
+  const { participantIds } = req.body
+
+  if (!name) {
+    return res.status(400).json({
+      error: 'group name is required'
+    })
+  }
+
+  if (
+    !Array.isArray(participantIds) ||
+    participantIds.length < 2 ||
+    participantIds.some(
+      participantId =>
+        typeof participantId !== 'string' || !participantId.trim()
+    )
+  ) {
+    return res.status(400).json({
+      error: 'select at least two group members'
+    })
+  }
+
+  const uniqueParticipantIds = [
+    ...new Set(participantIds.map(participantId => participantId.trim()))
+  ].filter(participantId => participantId !== decodedToken.id)
+
+  if (uniqueParticipantIds.length < 2) {
+    return res.status(400).json({
+      error: 'select at least two other group members'
+    })
+  }
+
+  const participants = await User.find({
+    _id: { $in: uniqueParticipantIds }
+  })
+
+  if (participants.length !== uniqueParticipantIds.length) {
+    return res.status(404).json({
+      error: 'one or more users were not found'
+    })
+  }
+
+  const conversation = new Conversation({
+    type: 'group',
+    name,
+    participants: [decodedToken.id, ...uniqueParticipantIds],
+    createdBy: decodedToken.id
+  })
+
+  const savedConversation = await conversation.save()
+  await savedConversation.populate('participants', 'username name')
+
+  const io = req.app.get('io')
+
+  uniqueParticipantIds.forEach(participantId => {
+    io.to(`user:${participantId}`).emit(
+      'conversation:created',
+      savedConversation.toJSON()
+    )
+  })
+
+  return res.status(201).json(savedConversation)
+})
+
+conversationsRouter.post(
+  '/:conversationId/participants',
+  async (req, res) => {
+    const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
+
+    if (!decodedToken.id) {
+      return res.status(401).json({
+        error: 'token invalid'
+      })
+    }
+
+    const conversation = await Conversation.findById(
+      req.params.conversationId
+    )
+
+    if (!conversation) {
+      return res.status(404).json({
+        error: 'conversation not found'
+      })
+    }
+
+    if (conversation.type !== 'group') {
+      return res.status(400).json({
+        error: 'members can only be added to group conversations'
+      })
+    }
+
+    const isParticipant = conversation.participants.some(
+      participantId =>
+        participantId.toString() === decodedToken.id
+    )
+
+    if (!isParticipant) {
+      return res.status(403).json({
+        error: 'not allowed to invite members to this group'
+      })
+    }
+
+    const { participantIds } = req.body
+
+    if (
+      !Array.isArray(participantIds) ||
+      participantIds.length === 0 ||
+      participantIds.some(
+        participantId =>
+          typeof participantId !== 'string' || !participantId.trim()
+      )
+    ) {
+      return res.status(400).json({
+        error: 'select at least one user to invite'
+      })
+    }
+
+    const existingParticipantIds = new Set(
+      conversation.participants.map(participantId => participantId.toString())
+    )
+    const newParticipantIds = [
+      ...new Set(participantIds.map(participantId => participantId.trim()))
+    ].filter(participantId => !existingParticipantIds.has(participantId))
+
+    if (newParticipantIds.length === 0) {
+      return res.status(400).json({
+        error: 'selected users are already group members'
+      })
+    }
+
+    const newParticipants = await User.find({
+      _id: { $in: newParticipantIds }
+    })
+
+    if (newParticipants.length !== newParticipantIds.length) {
+      return res.status(404).json({
+        error: 'one or more users were not found'
+      })
+    }
+
+    conversation.participants.push(...newParticipantIds)
+    await conversation.save()
+    await conversation.populate('participants', 'username name')
+
+    const updatedConversation = conversation.toJSON()
+    const io = req.app.get('io')
+
+    conversation.participants.forEach(participant => {
+      io.to(`user:${participant.id}`).emit(
+        'conversation:updated',
+        updatedConversation
+      )
+    })
+
+    return res.json(updatedConversation)
+  }
+)
+
 conversationsRouter.post('/ai', async (req, res) => {
   const decodedToken = jwt.verify(
     getTokenFrom(req),
