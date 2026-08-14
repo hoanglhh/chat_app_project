@@ -64,4 +64,23 @@ const removeMessage = (conversationId, messageId) => {
   )
 }
 
-export default { setToken, getAll, create, getMessages, createMessage, updateMessage, removeMessage }
+const summarize = conversationId => {
+  return axios
+    .post(
+      `${baseUrl}/${conversationId}/summary`,
+      {},
+      getConfig()
+    )
+    .then(response => response.data.summary)
+}
+
+export default {
+  setToken,
+  getAll,
+  create,
+  getMessages,
+  createMessage,
+  updateMessage,
+  removeMessage,
+  summarize
+}

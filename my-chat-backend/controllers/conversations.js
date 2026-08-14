@@ -4,6 +4,8 @@ const User = require('../models/user')
 const jwt = require('jsonwebtoken')
 const config = require('../utils/config')
 const Message = require('../models/message')
+const { summarizeMessages } = require('../services/gemini')
+const { rateLimit } = require('express-rate-limit')
 
 const getTokenFrom = req => {
   const authorization = req.get('authorization')
@@ -14,6 +16,34 @@ const getTokenFrom = req => {
 
   return null
 }
+
+const authenticateSummaryRequest = (req, res, next) => {
+  try {
+    const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
+
+    if (!decodedToken.id) {
+      return res.status(401).json({
+        error: 'token invalid'
+      })
+    }
+
+    req.decodedToken = decodedToken
+    next()
+  } catch (error) {
+    next(error)
+  }
+}
+
+const summaryLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: req => req.decodedToken.id,
+  message: {
+    error: 'Too many summary requests. Please try again in 10 minutes.'
+  }
+})
 
 conversationsRouter.get('/', async (req, res) => {
   const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
@@ -115,6 +145,44 @@ conversationsRouter.get('/:conversationId/messages', async (req, res) => {
       .sort({ createdAt: 1 })
 
     return res.json(messages)
+  }
+)
+
+conversationsRouter.post(
+  '/:conversationId/summary',
+  authenticateSummaryRequest,
+  summaryLimiter,
+  async (req, res) => {
+    const decodedToken = req.decodedToken
+
+    const conversation = await Conversation.findById(req.params.conversationId)
+    if (!conversation) {
+      return res.status(404).json({
+        error: 'conversation not found'
+      })
+    }
+
+    const isParticipant = conversation.participants.some(
+      participantId => participantId.toString() === decodedToken.id
+    )
+
+    if (!isParticipant) {
+      return res.status(403).json({
+        error: 'not allowed to summarize this conversation'
+      })
+    }
+
+    const messages = await Message
+      .find({ conversation: conversation._id })
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .lean()
+
+    messages.reverse()
+
+    const summary = await summarizeMessages(messages)
+
+    return res.json({ summary })
   }
 )
 

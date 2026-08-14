@@ -171,6 +171,33 @@ describe('direct conversations', () => {
     assert.equal(response.body.id, conversation.id)
     assert.equal(await Conversation.countDocuments({}), 1)
   })
+
+  test('conversation summaries are limited per authenticated user', async () => {
+    const aliceToken = await loginAs('alice')
+    const summaryUrl = `/api/conversations/${conversation.id}/summary`
+
+    for (let requestNumber = 0; requestNumber < 5; requestNumber += 1) {
+      const response = await api
+        .post(summaryUrl)
+        .set('Authorization', `Bearer ${aliceToken}`)
+        .expect(200)
+
+      assert.equal(
+        response.body.summary,
+        'There are no messages to summarize yet.'
+      )
+    }
+
+    const response = await api
+      .post(summaryUrl)
+      .set('Authorization', `Bearer ${aliceToken}`)
+      .expect(429)
+
+    assert.equal(
+      response.body.error,
+      'Too many summary requests. Please try again in 10 minutes.'
+    )
+  })
 })
 
 describe('conversation-scoped messages', () => {

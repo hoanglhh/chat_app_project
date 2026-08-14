@@ -10,6 +10,7 @@ import socket from '../services/socket'
 import conversationService from '../services/conversations'
 import ConversationList from "../components/ConversationList"
 import NewConversationModal from '../components/NewConversationModal'
+import SummaryModal from '../components/SummaryModal'
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
@@ -39,6 +40,9 @@ const App = () => {
   const messageEndRef = useRef(null)
   const [editingMessageId, setEditingMessageId] = useState(null)
   const isEditing = editingMessageId !== null
+  const [summary, setSummary] = useState(null)
+  const [summarizing, setSummarizing] = useState(false)
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false)
   
   const showNotification = (message, type = 'error') => {
     setNotification({ message, type })
@@ -58,6 +62,8 @@ const App = () => {
     setEditingMessageId(null)
     setContent('')
     setSelectedConversationId(conversationId)
+    setSummary(null)
+    setIsSummaryOpen(false)
   }
 
   const showConversationList = () => {
@@ -65,6 +71,8 @@ const App = () => {
     setLoading(false)
     setEditingMessageId(null)
     setContent('')
+    setSummary(null)
+    setIsSummaryOpen(false)
     setSelectedConversationId(null)
   }
 
@@ -78,6 +86,8 @@ const App = () => {
     setSelectedConversationId(null)
     setIsNewConversationOpen(false)
     setUser(null)
+    setSummary(null)
+    setIsSummaryOpen(false)
   }
 
   useEffect(() => {
@@ -450,6 +460,41 @@ const App = () => {
     ? selectedConversation.name
     : selectedParticipant?.name || selectedParticipant?.username
 
+  const handleSummarize = async () => {
+    if (!selectedConversationId || summarizing) {
+      return
+    }
+
+    setSummarizing(true)
+
+    try {
+      const generatedSummary = await conversationService.summarize(
+        selectedConversationId
+      )
+
+      setSummary(generatedSummary)
+      setIsSummaryOpen(true)
+    } catch (error) {
+      if (error.response?.status === 401) {
+        handleLogout()
+        showNotification('Your session expired. Please log in again.')
+        return
+      }
+
+      if (error.response?.status === 429) {
+        showNotification(
+          error.response.data.error ||
+          'Too many summary requests. Please try again later.'
+        )
+        return
+      }
+
+      showNotification('Failed to summarize conversation')
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
   return (
     <main className="h-dvh overflow-hidden bg-stone-100">
       <div className="mx-auto h-full w-full max-w-5xl sm:p-4">
@@ -636,6 +681,40 @@ const App = () => {
                           : `@${selectedParticipant?.username}`}
                       </p>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSummarize}
+                      disabled={summarizing || loading || messages.length === 0}
+                      className="ml-auto flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3"
+                      aria-label={summarizing ? 'Creating conversation recap' : 'Catch me up on this conversation'}
+                      title="Summarize the latest messages"
+                    >
+                      {summarizing ? (
+                        <span className="size-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+                      ) : (
+                        <svg
+                          aria-hidden="true"
+                          className="size-4 text-blue-600"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="m12 3 .8 2.2A5.8 5.8 0 0 0 16.3 8.7l2.2.8-2.2.8a5.8 5.8 0 0 0-3.5 3.5L12 16l-.8-2.2a5.8 5.8 0 0 0-3.5-3.5l-2.2-.8 2.2-.8a5.8 5.8 0 0 0 3.5-3.5L12 3Z"
+                          />
+                        </svg>
+                      )}
+                      <span className="hidden sm:inline">
+                        {summarizing ? 'Summarizing…' : 'Catch me up'}
+                      </span>
+                      <span className="sm:hidden">
+                        {summarizing ? 'Working…' : 'Recap'}
+                      </span>
+                    </button>
                   </>
                 ) : (
                   <div>
@@ -718,6 +797,14 @@ const App = () => {
                 users={users}
                 onSelect={startConversation}
                 onClose={() => setIsNewConversationOpen(false)}
+              />
+            )}
+
+            {isSummaryOpen && summary && (
+              <SummaryModal
+                summary={summary}
+                conversationName={selectedConversationName}
+                onClose={() => setIsSummaryOpen(false)}
               />
             )}
           </div>
