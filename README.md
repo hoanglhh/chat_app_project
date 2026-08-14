@@ -1,7 +1,6 @@
 # Chat App
 
-A responsive, realtime full-stack chat application built while studying
-[Full Stack Open](https://fullstackopen.com/). It supports private and group
+A responsive, realtime full-stack chat application. It supports private and group
 conversations, secure message ownership, live updates with Socket.IO, and
 Gemini-powered chat and conversation summaries.
 
