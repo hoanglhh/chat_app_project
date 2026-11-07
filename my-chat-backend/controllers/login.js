@@ -1,22 +1,25 @@
-const jwt = require('jsonwebtoken')
 const bcrypt = require('bcrypt')
 const loginRouter = require('express').Router()
 const User = require('../models/user')
-const config = require('../utils/config')
+const loginResponse = require('../utils/loginResponse')
+const { getTrimmedText } = require('../utils/validation')
+const { loginLimiter } = require('../utils/authLimiters')
 
-loginRouter.post('/', async (req, res) => {
-  const { username, password } = req.body
+loginRouter.post('/', loginLimiter, async (req, res) => {
+  const { username, password } = req.body || {}
 
-  const trimmedUsername = username?.trim()
+  const trimmedUsername = getTrimmedText(username)
 
-  if (!trimmedUsername || !password) {
+  if (
+    !trimmedUsername || typeof password !== 'string' || !password
+  ) {
     return res.status(401).json({
       error: 'invalid username or password'
     })
   }
 
   const user = await User.findOne({ username: trimmedUsername })
-  const passwordCorrect = user === null
+  const passwordCorrect = user === null || !user.passwordHash
     ? false
     : await bcrypt.compare(password, user.passwordHash)
 
@@ -26,23 +29,7 @@ loginRouter.post('/', async (req, res) => {
     })
   }
 
-  const userForToken = {
-    username: user.username,
-    id: user._id,
-  }
-
-  const token = jwt.sign(userForToken, config.SECRET, {
-    expiresIn: 60*60
-  })
-
-  res
-    .status(200)
-    .send({ 
-      token, 
-      username: user.username, 
-      name: user.name,
-      id: user._id.toString() 
-    })
+  res.set('Cache-Control', 'no-store').status(200).json(loginResponse(user))
 })
 
 module.exports = loginRouter

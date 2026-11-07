@@ -13,8 +13,9 @@ const userSchema = new mongoose.Schema({
   },
   passwordHash: {
     type: String,
-    required: true
+    required: function () { return !this.googleSub }
   },
+  googleSub: { type: String, unique: true, sparse: true },
   messages: [
     {
       type: mongoose.Schema.Types.ObjectId,
@@ -29,6 +30,7 @@ userSchema.set('toJSON', {
     delete returnedObject._id
     delete returnedObject.__v
     delete returnedObject.passwordHash
+    delete returnedObject.googleSub
   }
 })
 

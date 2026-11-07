@@ -7,33 +7,8 @@ const logger = require('../utils/logger')
 const Message = require('../models/message')
 const { summarizeMessages, generateAiReply } = require('../services/gemini')
 const { rateLimit } = require('express-rate-limit')
-
-const getTokenFrom = req => {
-  const authorization = req.get('authorization')
-
-  if (authorization?.startsWith('Bearer ')) {
-    return authorization.replace('Bearer ', '')
-  }
-
-  return null
-}
-
-const authenticateGeminiRequest = (req, res, next) => {
-  try {
-    const decodedToken = jwt.verify(getTokenFrom(req), config.SECRET)
-
-    if (!decodedToken.id) {
-      return res.status(401).json({
-        error: 'token invalid'
-      })
-    }
-
-    req.decodedToken = decodedToken
-    next()
-  } catch (error) {
-    next(error)
-  }
-}
+const { getTokenFrom, authenticateUser } = require('../utils/middleware')
+const { getTrimmedText } = require('../utils/validation')
 
 const summaryLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
@@ -82,8 +57,8 @@ conversationsRouter.post('/', async (req, res) => {
     })
   }
 
-  const { participantId } = req.body
-  if (!participantId) {
+  const participantId = getTrimmedText(req.body?.participantId)
+  if (!participantId || participantId.length !== 24) {
     return res.status(400).json({
       error: 'participantId is required'
     })
@@ -123,6 +98,11 @@ conversationsRouter.post('/', async (req, res) => {
   const savedConversation = await conversation.save()
   await savedConversation.populate('participants', 'username name')
 
+  req.app.get('io').to(`user:${participant.id}`).emit(
+    'conversation:created',
+    savedConversation.toJSON()
+  )
+
   return res.status(201).json(savedConversation)
 }) 
 
@@ -135,12 +115,18 @@ conversationsRouter.post('/group', async (req, res) => {
     })
   }
 
-  const name = req.body.name?.trim()
-  const { participantIds } = req.body
+  const name = getTrimmedText(req.body?.name)
+  const { participantIds } = req.body || {}
 
   if (!name) {
     return res.status(400).json({
       error: 'group name is required'
+    })
+  }
+
+  if (name.length > 100) {
+    return res.status(400).json({
+      error: 'group name must be at most 100 characters'
     })
   }
 
@@ -237,7 +223,7 @@ conversationsRouter.post(
       })
     }
 
-    const { participantIds } = req.body
+    const { participantIds } = req.body || {}
 
     if (
       !Array.isArray(participantIds) ||
@@ -363,17 +349,44 @@ conversationsRouter.get('/:conversationId/messages', async (req, res) => {
       })
     }
 
-    const messages = await Message
-      .find({ conversation: conversation.id })
-      .sort({ createdAt: 1 })
+    const filter = { conversation: conversation._id }
+    const { before } = req.query
 
-    return res.json(messages)
+    if (before !== undefined) {
+      const [timestamp, id, extra] = typeof before === 'string' ? before.split('_') : []
+      const date = new Date(timestamp)
+
+      if (
+        extra !== undefined || !/^[a-f\d]{24}$/i.test(id || '') ||
+        !Number.isFinite(date.getTime()) || date.toISOString() !== timestamp
+      ) {
+        return res.status(400).json({ error: 'invalid message cursor' })
+      }
+
+      filter.$or = [
+        { createdAt: { $lt: date } },
+        { createdAt: date, _id: { $lt: id } }
+      ]
+    }
+
+    const page = await Message.find(filter)
+      .sort({ createdAt: -1, _id: -1 })
+      .limit(51)
+    const messages = page.slice(0, 50).reverse()
+    const oldest = messages[0]
+
+    return res.json({
+      messages,
+      nextCursor: page.length > 50
+        ? `${oldest.createdAt.toISOString()}_${oldest.id}`
+        : null
+    })
   }
 )
 
 conversationsRouter.post(
   '/:conversationId/summary',
-  authenticateGeminiRequest,
+  authenticateUser,
   summaryLimiter,
   async (req, res) => {
     const decodedToken = req.decodedToken
@@ -403,15 +416,21 @@ conversationsRouter.post(
 
     messages.reverse()
 
-    const summary = await summarizeMessages(messages)
-
-    return res.json({ summary })
+    try {
+      const summary = await summarizeMessages(messages)
+      return res.json({ summary })
+    } catch (error) {
+      logger.error('Gemini failed to summarize messages:', error.message)
+      return res.status(502).json({
+        error: 'Gemini could not summarize this conversation. Please try again.'
+      })
+    }
   }
 )
 
 conversationsRouter.post(
   '/:conversationId/ai-messages',
-  authenticateGeminiRequest,
+  authenticateUser,
   aiMessageLimiter,
   async (req, res) => {
     const decodedToken = req.decodedToken
@@ -443,11 +462,11 @@ conversationsRouter.post(
       })
     }
 
-    const content = req.body.content?.trim()
+    const content = getTrimmedText(req.body?.content)
 
-    if (!content) {
+    if (!content || content.length > 10000) {
       return res.status(400).json({
-        error: 'content missing'
+        error: 'content must be 1 to 10000 characters'
       })
     }
 
@@ -545,10 +564,10 @@ conversationsRouter.post('/:conversationId/messages', async (req, res) => {
     })
   }
 
-  const content = req.body.content?.trim()
-  if (!content) {
+  const content = getTrimmedText(req.body?.content)
+  if (!content || content.length > 10000) {
     return res.status(400).json({
-      error: 'content missing'
+      error: 'content must be 1 to 10000 characters'
     })
   }
 
@@ -618,11 +637,11 @@ conversationsRouter.put('/:conversationId/messages/:messageId', async (req, res)
     })
   }
 
-  const content = req.body.content?.trim()
+  const content = getTrimmedText(req.body?.content)
 
-  if (!content) {
+  if (!content || content.length > 10000) {
     return res.status(400).json({
-      error: 'content missing'
+      error: 'content must be 1 to 10000 characters'
     })
   }
 

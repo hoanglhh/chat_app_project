@@ -6,8 +6,10 @@ const backendUrl =
 
 const baseUrl = `${backendUrl}/api/users`
 
-const getAll = () => {
-  return axios.get(baseUrl)
+const getAll = token => {
+  return axios.get(baseUrl, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
   .then(response => response.data)
 }
 

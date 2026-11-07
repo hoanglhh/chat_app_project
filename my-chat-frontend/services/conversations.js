@@ -47,9 +47,12 @@ const addParticipants = (conversationId, participantIds) => {
     .then(response => response.data)
 }
 
-const getMessages = conversationId => {
+const getMessages = (conversationId, before) => {
   return axios
-    .get(`${baseUrl}/${conversationId}/messages`, getConfig())
+    .get(`${baseUrl}/${conversationId}/messages`, {
+      ...getConfig(),
+      params: before ? { before } : {}
+    })
     .then(response => response.data)
 }
 

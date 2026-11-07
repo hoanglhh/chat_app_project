@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useLayoutEffect, useRef } from "react"
 import MessageForm from "../components/MessageForm"
 import MessageList from "../components/MessageList"
 import Notification from '../components/Notification'
@@ -27,14 +27,23 @@ const appendUniqueMessages = (currentMessages, incomingMessages) => {
     return true
   })
 
-  return currentMessages.concat(uniqueMessages)
+  return currentMessages.concat(uniqueMessages).sort((first, second) =>
+    new Date(first.createdAt) - new Date(second.createdAt) ||
+    first.id.localeCompare(second.id)
+  )
 }
+
+const applyHistoryChanges = (messages, changes) => messages
+  .map(message => changes.has(message.id) ? changes.get(message.id) : message)
+  .filter(Boolean)
 
 const App = () => {
   const [messages, setMessages] = useState([]) 
   const [content, setContent] = useState('')
   const [notification, setNotification] = useState({ message: null })
   const [loading, setLoading] = useState(false)
+  const [nextMessagesCursor, setNextMessagesCursor] = useState(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [sending, setSending] = useState(false)
   const [saving, setSaving] = useState(false)
   const [username, setUsername] = useState('')
@@ -57,6 +66,10 @@ const App = () => {
   const [registerPassword, setRegisterPassword] = useState('')
   const [showRegistration, setShowRegistration] = useState(false)
   const messageEndRef = useRef(null)
+  const messageScrollRef = useRef(null)
+  const scrollRestoreRef = useRef(null)
+  const messageViewIdRef = useRef(0)
+  const historyChangesRef = useRef(null)
   const [editingMessageId, setEditingMessageId] = useState(null)
   const isEditing = editingMessageId !== null
   const [summary, setSummary] = useState(null)
@@ -64,6 +77,10 @@ const App = () => {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false)
   const [aiRespondingConversationId, setAiRespondingConversationId] = useState(null)
   const selectedConversationIdRef = useRef(null)
+  const sessionIdRef = useRef(0)
+  const googleAbortRef = useRef(null)
+  const [googleEnabled, setGoogleEnabled] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
   
   const showNotification = (message, type = 'error') => {
     setNotification({ message, type })
@@ -78,8 +95,13 @@ const App = () => {
       return
     }
 
+    messageViewIdRef.current += 1
     setMessages([])
     setLoading(true)
+    setNextMessagesCursor(null)
+    setLoadingOlder(false)
+    scrollRestoreRef.current = null
+    historyChangesRef.current = null
     setEditingMessageId(null)
     setContent('')
     selectedConversationIdRef.current = conversationId
@@ -90,8 +112,13 @@ const App = () => {
   }
 
   const showConversationList = () => {
+    messageViewIdRef.current += 1
     setMessages([])
     setLoading(false)
+    setNextMessagesCursor(null)
+    setLoadingOlder(false)
+    scrollRestoreRef.current = null
+    historyChangesRef.current = null
     setEditingMessageId(null)
     setContent('')
     setSummary(null)
@@ -102,15 +129,27 @@ const App = () => {
   }
 
   const handleLogout = () => {
+    sessionIdRef.current += 1
+    googleAbortRef.current?.abort()
+    googleAbortRef.current = null
+    setGoogleLoading(false)
+    messageViewIdRef.current += 1
     window.localStorage.removeItem('loggedChatUser')
     setContent('')
     setEditingMessageId(null)
     setMessages([])
     setConversations([])
+    setNextMessagesCursor(null)
+    setLoadingOlder(false)
+    scrollRestoreRef.current = null
+    historyChangesRef.current = null
     setUsers([])
     selectedConversationIdRef.current = null
     setSelectedConversationId(null)
     setAiRespondingConversationId(null)
+    setSending(false)
+    setSaving(false)
+    setSummarizing(false)
     setIsNewConversationOpen(false)
     setIsInviteMembersOpen(false)
     setUser(null)
@@ -119,6 +158,28 @@ const App = () => {
   }
 
   useEffect(() => {
+    if (user) return
+    let active = true
+    loginService.getGoogleConfig()
+      .then(({ enabled }) => { if (active) setGoogleEnabled(enabled === true) })
+      .catch(() => { if (active) setGoogleEnabled(false) })
+    return () => { active = false }
+  }, [user])
+
+  useEffect(() => () => googleAbortRef.current?.abort(), [])
+  useEffect(() => {
+    if (showRegistration) googleAbortRef.current?.abort()
+  }, [showRegistration])
+
+  useLayoutEffect(() => {
+    if (scrollRestoreRef.current && messageScrollRef.current) {
+      const { height, top } = scrollRestoreRef.current
+      messageScrollRef.current.scrollTop =
+        top + messageScrollRef.current.scrollHeight - height
+      scrollRestoreRef.current = null
+      return
+    }
+
     messageEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, aiRespondingConversationId])
 
@@ -128,31 +189,108 @@ const App = () => {
     }
 
     const conversationId = selectedConversationId
+    const sessionId = sessionIdRef.current
+    const viewId = messageViewIdRef.current
+    const historyChanges = new Map()
+    historyChangesRef.current = historyChanges
 
     conversationService
       .getMessages(conversationId)
-      .then(conversationMessages => {
-        if (selectedConversationIdRef.current === conversationId) {
-          setMessages(conversationMessages)
+      .then(({ messages: conversationMessages, nextCursor }) => {
+        if (
+          sessionIdRef.current === sessionId &&
+          messageViewIdRef.current === viewId
+        ) {
+          setMessages(currentMessages =>
+            appendUniqueMessages(currentMessages, applyHistoryChanges(conversationMessages, historyChanges))
+          )
+          setNextMessagesCursor(nextCursor)
         }
       })
       .catch(error => {
+        if (sessionIdRef.current !== sessionId) {
+          return
+        }
+
         if (error.response?.status === 401) {
           handleLogout()
           showNotification('Your session expired. Please log in again.')
           return
         }
 
-        if (selectedConversationIdRef.current === conversationId) {
+        if (messageViewIdRef.current === viewId) {
           showNotification('Failed to load messages')
         }
       })
       .finally(() => {
-        if (selectedConversationIdRef.current === conversationId) {
+        if (historyChangesRef.current === historyChanges) {
+          historyChangesRef.current = null
+        }
+
+        if (
+          sessionIdRef.current === sessionId &&
+          messageViewIdRef.current === viewId
+        ) {
           setLoading(false)
         }
       })
   }, [user, selectedConversationId])
+
+  const loadOlderMessages = async () => {
+    if (!selectedConversationId || !nextMessagesCursor || loadingOlder) {
+      return
+    }
+
+    const conversationId = selectedConversationId
+    const sessionId = sessionIdRef.current
+    const viewId = messageViewIdRef.current
+    const historyChanges = new Map()
+    historyChangesRef.current = historyChanges
+    setLoadingOlder(true)
+
+    try {
+      const { messages: olderMessages, nextCursor } =
+        await conversationService.getMessages(conversationId, nextMessagesCursor)
+
+      if (
+        sessionIdRef.current !== sessionId ||
+        messageViewIdRef.current !== viewId
+      ) {
+        return
+      }
+
+      const scrollArea = messageScrollRef.current
+      scrollRestoreRef.current = scrollArea
+        ? { height: scrollArea.scrollHeight, top: scrollArea.scrollTop }
+        : null
+      setMessages(currentMessages =>
+        appendUniqueMessages(currentMessages, applyHistoryChanges(olderMessages, historyChanges))
+      )
+      setNextMessagesCursor(nextCursor)
+    } catch (error) {
+      if (sessionIdRef.current !== sessionId) {
+        return
+      }
+
+      if (error.response?.status === 401) {
+        handleLogout()
+        showNotification('Your session expired. Please log in again.')
+      } else if (messageViewIdRef.current === viewId) {
+        showNotification('Failed to load older messages. Please try again.')
+      }
+    } finally {
+      if (historyChangesRef.current === historyChanges) {
+        historyChangesRef.current = null
+      }
+
+      if (
+        sessionIdRef.current === sessionId &&
+        messageViewIdRef.current === viewId
+      ) {
+        setLoadingOlder(false)
+      }
+    }
+  }
 
   useEffect(() => {
     const handleConnect = () => {
@@ -186,6 +324,11 @@ const App = () => {
     socket.on('message:created', handleMessageCreated)
 
     const handleMessageUpdated = updatedMessage => {
+      if (updatedMessage.conversation !== selectedConversationIdRef.current) {
+        return
+      }
+
+      historyChangesRef.current?.set(updatedMessage.id, updatedMessage)
       setMessages(currentMessages =>
         currentMessages.map(message =>
           message.id === updatedMessage.id
@@ -198,6 +341,7 @@ const App = () => {
     socket.on('message:updated', handleMessageUpdated)
 
     const handleMessageDeleted = deletedMessageId => {
+      historyChangesRef.current?.set(deletedMessageId, null)
       setMessages(currentMessages =>
         currentMessages.filter(
           message => message.id !== deletedMessageId
@@ -276,12 +420,17 @@ const App = () => {
       return
     }
 
+    const sessionId = sessionIdRef.current
     Promise.all([
-      userService.getAll(),
+      userService.getAll(user.token),
       conversationService.getAll(),
       conversationService.getOrCreateAiConversation()
     ])
       .then(([allUsers, initialConversations, aiConversation]) => {
+        if (sessionIdRef.current !== sessionId) {
+          return
+        }
+
         setUsers(
           allUsers.filter(otherUser => otherUser.id !== user.id)
         )
@@ -293,11 +442,12 @@ const App = () => {
         ])
       })
       .catch(error => {
+        if (sessionIdRef.current !== sessionId) {
+          return
+        }
+
         if (error.response?.status === 401) {
-          window.localStorage.removeItem('loggedChatUser')
-          setUser(null)
-          setMessages([])
-          setConversations([])
+          handleLogout()
           showNotification('Your session expired. Please log in again.')
           return
         }
@@ -355,6 +505,8 @@ const App = () => {
       return
     } 
 
+    const conversationId = selectedConversationId
+    const sessionId = sessionIdRef.current
     const messageObject = {
       content,
     }
@@ -364,7 +516,6 @@ const App = () => {
     )
 
     if (activeConversation?.type === 'ai') {
-      const conversationId = selectedConversationId
       const submittedContent = content
 
       setContent('')
@@ -373,7 +524,10 @@ const App = () => {
       conversationService
         .createAiMessage(conversationId, messageObject)
         .then(({ userMessage, assistantMessage }) => {
-          if (selectedConversationIdRef.current !== conversationId) {
+          if (
+            sessionIdRef.current !== sessionId ||
+            selectedConversationIdRef.current !== conversationId
+          ) {
             return
           }
 
@@ -385,6 +539,10 @@ const App = () => {
           )
         })
         .catch(error => {
+          if (sessionIdRef.current !== sessionId) {
+            return
+          }
+
           const savedUserMessage = error.response?.data?.userMessage
           const isStillSelected =
             selectedConversationIdRef.current === conversationId
@@ -425,6 +583,10 @@ const App = () => {
           )
         })
         .finally(() => {
+          if (sessionIdRef.current !== sessionId) {
+            return
+          }
+
           setAiRespondingConversationId(currentConversationId =>
             currentConversationId === conversationId
               ? null
@@ -438,14 +600,27 @@ const App = () => {
     setSending(true)
     
     conversationService
-      .createMessage(selectedConversationId, messageObject)
+      .createMessage(conversationId, messageObject)
       .then(returnedMessage => {
+        if (
+          sessionIdRef.current !== sessionId ||
+          selectedConversationIdRef.current !== conversationId
+        ) {
+          return
+        }
+
         setMessages(currentMessages =>
           appendUniqueMessages(currentMessages, [returnedMessage])
         )
-        setContent('')
+        setContent(currentContent =>
+          currentContent === messageObject.content ? '' : currentContent
+        )
       })
       .catch(error => {
+        if (sessionIdRef.current !== sessionId) {
+          return
+        }
+
         if (error.response && error.response.status === 400) {
           showNotification(error.response.data.error)
         } else {
@@ -453,7 +628,9 @@ const App = () => {
         }
       })
       .finally(() => {
-        setSending(false)
+        if (sessionIdRef.current === sessionId) {
+          setSending(false)
+        }
       })
   }
 
@@ -488,24 +665,37 @@ const App = () => {
       return
     }
 
+    const conversationId = selectedConversationId
+    const sessionId = sessionIdRef.current
     setSaving(true)
 
     return conversationService
       .updateMessage(
-        selectedConversationId,
+        conversationId,
         id,
         { content: newContent }
       )
       .then(returnedMessage => {
+        if (
+          sessionIdRef.current !== sessionId ||
+          selectedConversationIdRef.current !== conversationId
+        ) {
+          return
+        }
+
         setMessages(currentMessages =>
           currentMessages.map(message =>
             message.id === id ? returnedMessage : message
           )
         )
-        setEditingMessageId(null)
-        setContent('')
+        setEditingMessageId(currentId => currentId === id ? null : currentId)
+        setContent(currentContent => currentContent === newContent ? '' : currentContent)
       })
       .catch(error => {
+        if (sessionIdRef.current !== sessionId) {
+          return
+        }
+
         if (error.response && error.response.status === 400) {
           showNotification(error.response.data.error)
         } else {
@@ -513,7 +703,9 @@ const App = () => {
         }
       })
       .finally(() => {
-        setSaving(false)
+        if (sessionIdRef.current === sessionId) {
+          setSaving(false)
+        }
       })
     }
 
@@ -527,20 +719,47 @@ const App = () => {
     setContent('')
   }
 
+  const finishLogin = (loggedInUser, sessionId) => {
+    if (sessionIdRef.current !== sessionId) return
+    sessionIdRef.current += 1
+    googleAbortRef.current?.abort()
+    googleAbortRef.current = null
+    setGoogleLoading(false)
+    setUser(loggedInUser)
+    setUsername('')
+    setPassword('')
+    window.localStorage.setItem('loggedChatUser', JSON.stringify(loggedInUser))
+  }
+
+  const handleGoogleLogin = async () => {
+    if (googleLoading) return
+    const sessionId = sessionIdRef.current
+    const controller = new AbortController()
+    googleAbortRef.current = controller
+    setGoogleLoading(true)
+    try {
+      finishLogin(await loginService.loginWithGoogle(controller.signal), sessionId)
+    } catch (error) {
+      if (error.name !== 'AbortError' && sessionIdRef.current === sessionId) showNotification(error.message)
+    } finally {
+      if (googleAbortRef.current === controller) {
+        googleAbortRef.current = null
+        setGoogleLoading(false)
+      }
+    }
+  }
+
   const handleLogin = async event => {
     event.preventDefault()
+    const sessionId = sessionIdRef.current
     
     try {
       const loggedInUser = await loginService.login({ username, password })
-      setUser(loggedInUser)
-      setUsername('')
-      setPassword('')
-      window.localStorage.setItem(
-        'loggedChatUser',
-        JSON.stringify(loggedInUser)
-      )
-    } catch {
-      showNotification('wrong credentials')
+      finishLogin(loggedInUser, sessionId)
+    } catch (error) {
+      showNotification(error.response?.status === 429
+        ? error.response.data?.error || 'Too many login attempts. Please try again later.'
+        : 'wrong credentials')
     }
   }
 
@@ -685,16 +904,29 @@ const App = () => {
       return
     }
 
+    const conversationId = selectedConversationId
+    const sessionId = sessionIdRef.current
     setSummarizing(true)
 
     try {
       const generatedSummary = await conversationService.summarize(
-        selectedConversationId
+        conversationId
       )
+
+      if (
+        sessionIdRef.current !== sessionId ||
+        selectedConversationIdRef.current !== conversationId
+      ) {
+        return
+      }
 
       setSummary(generatedSummary)
       setIsSummaryOpen(true)
     } catch (error) {
+      if (sessionIdRef.current !== sessionId) {
+        return
+      }
+
       if (error.response?.status === 401) {
         handleLogout()
         showNotification('Your session expired. Please log in again.')
@@ -711,7 +943,9 @@ const App = () => {
 
       showNotification('Failed to summarize conversation')
     } finally {
-      setSummarizing(false)
+      if (sessionIdRef.current === sessionId) {
+        setSummarizing(false)
+      }
     }
   }
 
@@ -797,6 +1031,22 @@ const App = () => {
                     setPassword={setPassword}
                     handleLogin={handleLogin}
                   />
+
+                  {googleEnabled && (
+                    <div className="mt-5 space-y-4">
+                      <p className="text-center text-sm text-slate-500">or</p>
+                      <button
+                        type="button"
+                        onClick={handleGoogleLogin}
+                        disabled={googleLoading}
+                        aria-label="Continue with Google"
+                        aria-busy={googleLoading}
+                        className="flex h-11 w-full items-center justify-center rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {googleLoading ? 'Signing in…' : 'Continue with Google'}
+                      </button>
+                    </div>
+                  )}
 
                   <p className="mt-6 text-center text-sm text-slate-500">
                     New here?{' '}
@@ -1000,7 +1250,24 @@ const App = () => {
                 )}
               </div>
 
-              <div className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/50 px-4 py-5 sm:px-6">
+              <div
+                ref={messageScrollRef}
+                role="region"
+                aria-label="Message history"
+                className="chat-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain bg-slate-50/50 px-4 py-5 sm:px-6"
+              >
+                {nextMessagesCursor && !loading && (
+                  <div className="mb-5 flex justify-center">
+                    <button
+                      type="button"
+                      onClick={loadOlderMessages}
+                      disabled={loadingOlder}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {loadingOlder ? 'Loading older messages…' : 'Load older messages'}
+                    </button>
+                  </div>
+                )}
                 {!selectedConversationId ? (
                   <div className="flex h-full flex-col items-center justify-center px-6 text-center">
                     <span className="mb-4 flex size-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
